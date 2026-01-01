@@ -15,7 +15,7 @@ check_timescale
 # Test images
 *.avif
 *.webp
-
+*.json
 # Package/Bundle outputs
 *.deb
 *.app
