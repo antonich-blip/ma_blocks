@@ -1,0 +1,739 @@
+{
+  "blocks": [
+    {
+      "id": "56e14367-c3a9-4968-ba2a-790491bf80e2",
+      "position": [
+        32.0,
+        32.0
+      ],
+      "size": [
+        252.5127,
+        288.58594
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Free_exersize_03.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "20038be2-b4c4-4b1c-88b8-8f54e976fa9b",
+      "position": [
+        324.5127,
+        32.0
+      ],
+      "size": [
+        347.50555,
+        288.58594
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Free_exersize_01.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "ad1d0fc1-85de-4005-854b-98788143cebc",
+      "position": [
+        32.0,
+        360.58594
+      ],
+      "size": [
+        185.17596,
+        288.58594
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Free_exersize_02.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "dcd310d6-ff15-41c7-8480-fee76140babf",
+      "position": [
+        257.17596,
+        360.58594
+      ],
+      "size": [
+        201.17737,
+        289.1172
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Slouching_ages_02.avif",
+      "chained": false,
+      "animation_enabled": true,
+      "counter": 0
+    },
+    {
+      "id": "420c1b54-61fd-4291-ab77-f8aaa69af542",
+      "position": [
+        498.35333,
+        360.58594
+      ],
+      "size": [
+        226.2828,
+        279.9375
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Slouching_ages_03.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "cd989951-58e7-45b9-b2e0-b7859155fd88",
+      "position": [
+        32.0,
+        689.7031
+      ],
+      "size": [
+        297.4336,
+        279.9375
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Slouching_ages_01.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "c58b4eab-5c08-4e5b-bb87-8ab185db0260",
+      "position": [
+        369.4336,
+        689.7031
+      ],
+      "size": [
+        239.11328,
+        279.9375
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Slouching_ages_07.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "b34ceaba-b0e1-4d21-a9c7-62a87a4bff31",
+      "position": [
+        648.5469,
+        689.7031
+      ],
+      "size": [
+        222.7836,
+        279.9375
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Slouching_ages_04.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "56be9630-ad7d-4473-8669-dae639633d94",
+      "position": [
+        32.0,
+        1009.6406
+      ],
+      "size": [
+        233.28125,
+        279.9375
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Slouching_ages_05.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "2ac4f4b1-28ba-41f6-895d-f8c2e0c26abc",
+      "position": [
+        305.28125,
+        1009.6406
+      ],
+      "size": [
+        237.94688,
+        279.9375
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Slouching_ages_06.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "6932ae48-9b2b-460e-b2f8-ded34ccb2dc4",
+      "position": [
+        583.22815,
+        1009.6406
+      ],
+      "size": [
+        239.19391,
+        324.33072
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Free_posture_restore_04.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "09d30117-0a85-4b26-9efe-c8c6c778ab8f",
+      "position": [
+        32.0,
+        1373.9713
+      ],
+      "size": [
+        204.1211,
+        279.9375
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Slouching_ages_08.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "6f99235e-0d4c-4953-8fc8-cb7346e31920",
+      "position": [
+        276.1211,
+        1373.9713
+      ],
+      "size": [
+        183.03613,
+        272.84888
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Free_posture_restore_02.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "cc67e17a-9914-43c4-ab12-9152fac6e6b2",
+      "position": [
+        499.15723,
+        1373.9713
+      ],
+      "size": [
+        224.32875,
+        324.33072
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Free_posture_restore_03.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "b4750def-9e9b-4b41-8e61-f52efd369b96",
+      "position": [
+        32.0,
+        1738.302
+      ],
+      "size": [
+        298.65454,
+        324.33072
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Free_posture_restore_05.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "79868cd1-584a-4555-abdb-e20982d8fca7",
+      "position": [
+        370.65454,
+        1738.302
+      ],
+      "size": [
+        231.75645,
+        319.66406
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Free_posture_restore_01.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "aae6e63c-3aa4-4367-bed2-9c2a8cd40f1c",
+      "position": [
+        642.411,
+        1738.302
+      ],
+      "size": [
+        182.43604,
+        324.33072
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Free_posture_restore_06.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "e22d037d-f8c2-40a7-87b4-59d7a1d9167f",
+      "position": [
+        32.0,
+        2102.6328
+      ],
+      "size": [
+        334.375,
+        264.8515
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/antilouching_effects_01.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "0fc7babd-5940-44c0-9b20-ab2bf39e93b5",
+      "position": [
+        406.375,
+        2102.6328
+      ],
+      "size": [
+        329.96082,
+        264.8515
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/antilouching_effects_03.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "be6b157c-411b-4265-89ef-6d9406289c13",
+      "position": [
+        32.0,
+        2407.4844
+      ],
+      "size": [
+        301.26855,
+        264.8515
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/antilouching_effects_02.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "df1e1a06-55e2-4f77-b7a1-11551c44c1e9",
+      "position": [
+        373.26855,
+        2407.4844
+      ],
+      "size": [
+        250.43402,
+        280.8606
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/antilouching_effects_05.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "4f7df594-3c33-483f-bf04-ae23e06877ff",
+      "position": [
+        32.0,
+        2728.345
+      ],
+      "size": [
+        273.81293,
+        355.21677
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/antilouching_effects_04.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "2f17d500-9044-4114-9569-d3572d2d9541",
+      "position": [
+        345.81293,
+        2728.345
+      ],
+      "size": [
+        336.48776,
+        264.48822
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Спортивный_01.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "592b6066-726b-4f4f-88df-852344e7e410",
+      "position": [
+        32.0,
+        3123.5618
+      ],
+      "size": [
+        340.89594,
+        264.48822
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Спортивный_03.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "86f23a86-2a7f-496a-b899-11b3f037d62d",
+      "position": [
+        412.89594,
+        3123.5618
+      ],
+      "size": [
+        346.77344,
+        264.48822
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Спортивный_02.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "3d3bae44-a2ff-48ed-a027-74e5b1f31eb0",
+      "position": [
+        32.0,
+        3428.05
+      ],
+      "size": [
+        340.89594,
+        264.48822
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Спортивный_04.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "b4771fc5-7844-4c8a-a400-e9c16afb07b8",
+      "position": [
+        412.89594,
+        3428.05
+      ],
+      "size": [
+        420.0,
+        360.0
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Wake_Up_Gymnastics_01.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "25d3bd42-c638-4cf9-bb4a-40105e1eb3ac",
+      "position": [
+        32.0,
+        3828.05
+      ],
+      "size": [
+        315.0,
+        420.0
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Wake_Up_Gymnastics_02.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "9e4f5410-4c31-472d-b337-c141d7b92ddb",
+      "position": [
+        387.0,
+        3828.05
+      ],
+      "size": [
+        346.5,
+        420.0
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Wake_Up_Gymnastics_03.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "cfb11d76-c0ea-41f1-be9c-394b498392b8",
+      "position": [
+        32.0,
+        4288.05
+      ],
+      "size": [
+        420.0,
+        404.81927
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Wake_Up_Gymnastics_04.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "7170070c-7d9b-4b08-b021-c3195bb70b4b",
+      "position": [
+        492.0,
+        4288.05
+      ],
+      "size": [
+        381.5,
+        420.0
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Wake_Up_Gymnastics_05.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "ebdf6dc6-a72e-4fad-ba36-9aec59db78db",
+      "position": [
+        32.0,
+        4748.05
+      ],
+      "size": [
+        420.0,
+        377.52808
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Wake_Up_Gymnastics_06.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "727a1323-998f-417d-a9fc-825be99d9506",
+      "position": [
+        492.0,
+        4748.05
+      ],
+      "size": [
+        334.25,
+        420.0
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Wake_Up_Gymnastics_07.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "b3460a58-890f-4744-8ca8-b71ce090adf7",
+      "position": [
+        32.0,
+        5208.05
+      ],
+      "size": [
+        292.25,
+        420.0
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Wake_Up_Gymnastics_08.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "502ff7e5-4ac6-44c5-b345-b0c9c74b7301",
+      "position": [
+        364.25,
+        5208.05
+      ],
+      "size": [
+        404.25,
+        420.0
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Wake_Up_Gymnastics_09.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "169a60df-fe9f-4ab2-9e53-2af1f536a620",
+      "position": [
+        32.0,
+        5668.05
+      ],
+      "size": [
+        337.75,
+        420.0
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Wake_Up_Gymnastics_10.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "d74943bb-e433-4824-8988-5be9bc81d07b",
+      "position": [
+        409.75,
+        5668.05
+      ],
+      "size": [
+        420.0,
+        323.07693
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Утренняя_Гимнастика_01.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "c4f2aea6-1d25-401c-99fd-c08de677d525",
+      "position": [
+        32.0,
+        6128.05
+      ],
+      "size": [
+        226.51822,
+        267.52002
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Здоровая_Спина_Шея_01.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "d5c9cae2-bc36-417b-83eb-966109f40061",
+      "position": [
+        298.51822,
+        6128.05
+      ],
+      "size": [
+        241.17961,
+        267.52002
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Здоровая_Спина_Шея_02.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "836e51b9-9c7c-40ed-856e-2807dede2aad",
+      "position": [
+        579.6979,
+        6128.05
+      ],
+      "size": [
+        206.122,
+        267.52002
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Здоровая_Спина_Шея_03.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "009543c1-73bb-4998-a6f5-37a0805dd367",
+      "position": [
+        32.0,
+        6435.57
+      ],
+      "size": [
+        258.17804,
+        267.52002
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Здоровая_Спина_Шея_04.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "ee5762f5-25c1-4b1e-a35f-d33433809189",
+      "position": [
+        330.17804,
+        6435.57
+      ],
+      "size": [
+        207.8338,
+        337.15262
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/упражнения_для_спины_01.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "138d040f-59ab-493e-9153-c02b4c5c2850",
+      "position": [
+        578.01184,
+        6435.57
+      ],
+      "size": [
+        207.8338,
+        337.15262
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/упражнения_для_спины_02.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "d3072918-e1c9-46ef-81a9-859a8a7f820f",
+      "position": [
+        32.0,
+        6812.7227
+      ],
+      "size": [
+        227.01608,
+        337.15262
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/упражнения_для_спины_03.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "6a2fb619-9787-439f-8d5d-0601c9e29081",
+      "position": [
+        299.01608,
+        6812.7227
+      ],
+      "size": [
+        135.66406,
+        241.18056
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Утренняя_Гимнастика_02.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "5bd0f8c8-cb75-45a6-87cd-9d86a4054b2e",
+      "position": [
+        474.68015,
+        6812.7227
+      ],
+      "size": [
+        135.66406,
+        241.18056
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Утренняя_Гимнастика_03.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "3c7979af-ae2f-492f-8da7-a27db3c7d991",
+      "position": [
+        650.34424,
+        6812.7227
+      ],
+      "size": [
+        203.99857,
+        241.18056
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Здоровое_Тело_3.1.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "d77904a4-81d5-4055-af1a-53194a666f81",
+      "position": [
+        32.0,
+        7189.8755
+      ],
+      "size": [
+        135.66406,
+        241.18056
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Здоровое_Тело_3.2.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    },
+    {
+      "id": "2bea4c11-9349-405b-9414-8ea44fa4142c",
+      "position": [
+        207.66406,
+        7189.8755
+      ],
+      "size": [
+        135.66406,
+        241.18056
+      ],
+      "path": "/home/antonich/ma_blocks/test_images/Здоровое_Тело_3.3.avif",
+      "chained": false,
+      "animation_enabled": false,
+      "counter": 0
+    }
+  ]
+}
