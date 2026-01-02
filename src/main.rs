@@ -675,8 +675,23 @@ impl eframe::App for MaBlocksApp {
                             && response.dragged_by(egui::PointerButton::Primary)
                         {
                             if let Some(pointer) = response.interact_pointer_pos() {
+                                // Autoscroll logic: proportional to distance beyond borders
+                                let viewport = ui.clip_rect();
+                                let mut scroll_delta = 0.0;
+                                if pointer.y < viewport.min.y {
+                                    scroll_delta = viewport.min.y - pointer.y;
+                                } else if pointer.y > viewport.max.y {
+                                    scroll_delta = viewport.max.y - pointer.y;
+                                }
+
+                                if scroll_delta != 0.0 {
+                                    ui.scroll_with_delta(vec2(0.0, scroll_delta));
+                                    ui.ctx().request_repaint();
+                                }
+
                                 let old_pos = self.blocks[index].position;
-                                let new_pos = (pointer - canvas_origin) / zoom
+                                let current_canvas_origin = canvas_origin + vec2(0.0, scroll_delta);
+                                let new_pos = (pointer - current_canvas_origin) / zoom
                                     - self.blocks[index].drag_offset;
                                 let delta = pos2(new_pos.x, new_pos.y) - old_pos;
 
