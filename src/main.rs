@@ -77,7 +77,6 @@ struct MaBlocksApp {
     skip_chain_cancel: bool,
     working_inner_width: f32,
     session_file: Option<PathBuf>,
-    counter_tool_active: bool,
     zoom: f32,
 }
 
@@ -85,9 +84,10 @@ struct MaBlocksApp {
 struct BlockControlHover {
     close_hovered: bool,
     chain_hovered: bool,
+    counter_hovered: bool,
 }
 
-fn block_control_rects(rect: Rect, block: &ImageBlock, zoom: f32) -> (Rect, Rect) {
+fn block_control_rects(rect: Rect, block: &ImageBlock, zoom: f32) -> (Rect, Rect, Rect) {
     let image_rect = Rect::from_min_size(
         pos2(
             rect.min.x + BLOCK_PADDING * zoom,
@@ -112,7 +112,12 @@ fn block_control_rects(rect: Rect, block: &ImageBlock, zoom: f32) -> (Rect, Rect
         Vec2::splat(btn_size),
     );
 
-    (close_rect, chain_rect)
+    let counter_rect = Rect::from_center_size(
+        chain_rect.center() - Vec2::new(btn_size + btn_spacing, 0.0),
+        Vec2::splat(btn_size),
+    );
+
+    (close_rect, chain_rect, counter_rect)
 }
 
 impl MaBlocksApp {
@@ -124,7 +129,6 @@ impl MaBlocksApp {
             skip_chain_cancel: false,
             working_inner_width: CANVAS_WORKING_WIDTH,
             session_file: None,
-            counter_tool_active: false,
             zoom: 1.0,
         }
     }
@@ -298,7 +302,7 @@ impl MaBlocksApp {
         let mut hover_state = BlockControlHover::default();
 
         if show_controls {
-            let (close_rect, chain_rect) = block_control_rects(rect, block, zoom);
+            let (close_rect, chain_rect, counter_rect) = block_control_rects(rect, block, zoom);
             // block_control_rects already uses the passed rect which is scaled
 
             let btn_size = 16.0 * zoom;
@@ -308,6 +312,7 @@ impl MaBlocksApp {
             hover_state.close_hovered = mouse_pos.is_some_and(|p| close_rect.contains(p));
             hover_state.chain_hovered =
                 chain_enabled && mouse_pos.is_some_and(|p| chain_rect.contains(p));
+            hover_state.counter_hovered = mouse_pos.is_some_and(|p| counter_rect.contains(p));
 
             painter.circle_filled(
                 close_rect.center(),
@@ -340,6 +345,23 @@ impl MaBlocksApp {
                 chain_rect.center(),
                 Align2::CENTER_CENTER,
                 "o",
+                FontId::monospace(12.0 * zoom),
+                Color32::WHITE,
+            );
+
+            painter.circle_filled(
+                counter_rect.center(),
+                btn_size / 2.0,
+                if hover_state.counter_hovered {
+                    Color32::from_rgb(0, 150, 0)
+                } else {
+                    Color32::from_rgb(0, 100, 0)
+                },
+            );
+            painter.text(
+                counter_rect.center(),
+                Align2::CENTER_CENTER,
+                "#",
                 FontId::monospace(12.0 * zoom),
                 Color32::WHITE,
             );
@@ -494,16 +516,6 @@ impl eframe::App for MaBlocksApp {
                         self.load_images(ctx);
                     }
 
-                    let mut btn = egui::Button::new(RichText::new("🔢").size(24.0))
-                        .min_size(Vec2::new(32.0, 32.0))
-                        .frame(false);
-                    if self.counter_tool_active {
-                        btn = btn.fill(Color32::from_rgb(0, 100, 0));
-                    }
-                    if ui.add(btn).on_hover_text("Counter Tool").clicked() {
-                        self.counter_tool_active = !self.counter_tool_active;
-                    }
-
                     if ui
                         .add(
                             egui::Button::new(RichText::new("🔄").size(24.0))
@@ -599,17 +611,33 @@ impl eframe::App for MaBlocksApp {
                         )
                         .translate(canvas_origin.to_vec2());
 
-                        let sense = if self.counter_tool_active {
-                            Sense::click()
-                        } else {
-                            Sense::click_and_drag()
-                        };
-
-                        let response = canvas_ui.allocate_rect(block_rect, sense);
+                        let response = canvas_ui.allocate_rect(block_rect, Sense::click_and_drag());
                         let mut remove = false;
 
+                        let block = &self.blocks[index];
+                        let show_controls =
+                            response.hovered() || block.is_dragging || block.chained;
+                        let mut hover_state = BlockControlHover::default();
+                        if show_controls {
+                            let (close_rect, chain_rect, counter_rect) =
+                                block_control_rects(block_rect, block, zoom);
+                            let mouse_pos = ui.input(|i| i.pointer.hover_pos());
+                            let chain_enabled = self.can_chain();
+                            hover_state.close_hovered =
+                                mouse_pos.is_some_and(|p| close_rect.contains(p));
+                            hover_state.chain_hovered =
+                                chain_enabled && mouse_pos.is_some_and(|p| chain_rect.contains(p));
+                            hover_state.counter_hovered =
+                                mouse_pos.is_some_and(|p| counter_rect.contains(p));
+                        }
+
                         // Resizing start: RMB + Drag
-                        if secondary_pressed && response.hovered() && !self.counter_tool_active {
+                        if secondary_pressed
+                            && response.hovered()
+                            && !hover_state.counter_hovered
+                            && !hover_state.close_hovered
+                            && !hover_state.chain_hovered
+                        {
                             if let Some(m_pos) = mouse_pos {
                                 let world_mouse = (m_pos - canvas_origin) / zoom;
                                 let center = self.blocks[index].rect().center();
@@ -630,79 +658,71 @@ impl eframe::App for MaBlocksApp {
                         }
 
                         // Dragging logic: LMB + Drag
-                        if !self.counter_tool_active {
-                            if response.drag_started_by(egui::PointerButton::Primary) {
-                                if let Some(pointer) = response.interact_pointer_pos() {
-                                    let block = &mut self.blocks[index];
-                                    block.drag_offset = (pointer - canvas_origin) / zoom
-                                        - vec2(block.position.x, block.position.y);
-                                    block.is_dragging = true;
-                                }
+                        if response.drag_started_by(egui::PointerButton::Primary)
+                            && !hover_state.counter_hovered
+                            && !hover_state.close_hovered
+                            && !hover_state.chain_hovered
+                        {
+                            if let Some(pointer) = response.interact_pointer_pos() {
+                                let block = &mut self.blocks[index];
+                                block.drag_offset = (pointer - canvas_origin) / zoom
+                                    - vec2(block.position.x, block.position.y);
+                                block.is_dragging = true;
                             }
+                        }
 
-                            if self.blocks[index].is_dragging
-                                && response.dragged_by(egui::PointerButton::Primary)
-                            {
-                                if let Some(pointer) = response.interact_pointer_pos() {
-                                    let old_pos = self.blocks[index].position;
-                                    let new_pos = (pointer - canvas_origin) / zoom
-                                        - self.blocks[index].drag_offset;
-                                    let delta = pos2(new_pos.x, new_pos.y) - old_pos;
+                        if self.blocks[index].is_dragging
+                            && response.dragged_by(egui::PointerButton::Primary)
+                        {
+                            if let Some(pointer) = response.interact_pointer_pos() {
+                                let old_pos = self.blocks[index].position;
+                                let new_pos = (pointer - canvas_origin) / zoom
+                                    - self.blocks[index].drag_offset;
+                                let delta = pos2(new_pos.x, new_pos.y) - old_pos;
 
-                                    let is_chained = self.blocks[index].chained;
-                                    let leader_id = self.blocks[index].id;
+                                let is_chained = self.blocks[index].chained;
+                                let leader_id = self.blocks[index].id;
 
-                                    self.blocks[index].position = pos2(new_pos.x, new_pos.y);
+                                self.blocks[index].position = pos2(new_pos.x, new_pos.y);
 
-                                    if is_chained {
-                                        for other in &mut self.blocks {
-                                            if other.chained && other.id != leader_id {
-                                                other.position += delta;
-                                            }
+                                if is_chained {
+                                    for other in &mut self.blocks {
+                                        if other.chained && other.id != leader_id {
+                                            other.position += delta;
                                         }
                                     }
                                 }
                             }
-
-                            if self.blocks[index].is_dragging && response.drag_stopped() {
-                                self.blocks[index].is_dragging = false;
-                                should_reorder = true;
-                            }
                         }
 
-                        let block = &self.blocks[index];
-                        let show_controls =
-                            response.hovered() || block.is_dragging || block.chained;
-                        let hover_state = self.render_block(
+                        if self.blocks[index].is_dragging && response.drag_stopped() {
+                            self.blocks[index].is_dragging = false;
+                            should_reorder = true;
+                        }
+
+                        self.render_block(
                             &mut canvas_ui,
-                            block,
+                            &self.blocks[index],
                             block_rect,
                             response.hovered(),
                             show_controls,
                         );
 
-                        if self.counter_tool_active {
-                            if response.clicked()
-                                && !secondary_down
-                                && !hover_state.close_hovered
-                                && !hover_state.chain_hovered
-                            {
-                                self.blocks[index].counter += 1;
-                            } else if response.secondary_clicked()
-                                && !hover_state.close_hovered
-                                && !hover_state.chain_hovered
-                            {
-                                self.blocks[index].counter =
-                                    (self.blocks[index].counter - 1).max(0);
-                            }
-                        } else if response.clicked() && !secondary_down {
+                        if response.clicked() && !secondary_down {
                             if hover_state.close_hovered {
                                 remove = true;
                             } else if hover_state.chain_hovered {
                                 self.toggle_chain_for_block(index);
-                            } else if block.frames.len() > 1 {
+                            } else if hover_state.counter_hovered {
+                                self.blocks[index].counter += 1;
+                            } else if self.blocks[index].frames.len() > 1 {
                                 // Toggle animation only if it's an animated format
                                 self.blocks[index].toggle_animation();
+                            }
+                        } else if response.secondary_clicked() {
+                            if hover_state.counter_hovered {
+                                self.blocks[index].counter =
+                                    (self.blocks[index].counter - 1).max(0);
                             }
                         }
 
@@ -715,7 +735,7 @@ impl eframe::App for MaBlocksApp {
                     }
 
                     // Chaining cancellation
-                    if !std::mem::take(&mut self.skip_chain_cancel) && !self.counter_tool_active {
+                    if !std::mem::take(&mut self.skip_chain_cancel) {
                         if canvas_ui
                             .input(|i| i.pointer.button_clicked(egui::PointerButton::Primary))
                         {
