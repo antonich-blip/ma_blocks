@@ -16,6 +16,11 @@ Ensure you have Xcode Command Line Tools installed:
 xcode-select --install
 ```
 
+You also need several system libraries for the UI and AVIF support. Run the provided setup script:
+```bash
+./setup_macos.sh
+```
+
 ### Build and Run
 Use standard Cargo commands to build and run the application:
 
