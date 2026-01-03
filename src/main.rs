@@ -427,11 +427,6 @@ impl MaBlocksApp {
                 tag_shape.fill_texture_id = rep_texture.id();
                 tag_shape.uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
                 painter.add(tag_shape);
-                painter.rect_stroke(
-                    tag_rect,
-                    egui::Rounding::same(2.0 * zoom),
-                    (1.0 * zoom, Color32::WHITE.gamma_multiply(0.8)),
-                );
             }
         } else {
             let mut rect_shape =
