@@ -21,6 +21,9 @@ pub struct ImageBlock {
     pub aspect_ratio: f32,
     pub chained: bool,
     pub counter: i32,
+    pub is_group: bool,
+    pub group_name: String,
+    pub children: Vec<ImageBlock>,
 }
 
 impl ImageBlock {
@@ -51,6 +54,37 @@ impl ImageBlock {
             aspect_ratio,
             chained: false,
             counter: 0,
+            is_group: false,
+            group_name: String::new(),
+            children: Vec::new(),
+        }
+    }
+
+    pub fn new_group(
+        name: String,
+        children: Vec<ImageBlock>,
+        texture: egui::TextureHandle,
+    ) -> Self {
+        let image_size = egui::vec2(80.0, 80.0);
+        Self {
+            id: Uuid::new_v4(),
+            path: String::new(),
+            texture,
+            frames: Vec::new(),
+            current_frame: 0,
+            frame_elapsed: Duration::ZERO,
+            animation_enabled: false,
+            position: egui::pos2(0.0, 0.0),
+            drag_offset: Vec2::ZERO,
+            is_dragging: false,
+            image_size,
+            preferred_image_size: image_size,
+            aspect_ratio: 1.0,
+            chained: false,
+            counter: 0,
+            is_group: true,
+            group_name: name,
+            children,
         }
     }
 
