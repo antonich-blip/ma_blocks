@@ -55,7 +55,7 @@ WINIT_UNIX_BACKEND=x11 cargo run
     *   📂 Load Session: Restores a previous session from a JSON file.
     *   🖼 Add Image: Bulk load images (PNG, JPG, GIF, WebP, AVIF).
     *   🔄 Reset Counters: Resets all block counters to zero.
-    *   📦 Compact/Unbox: Packs chained blocks into a single "Box" block or unpacks an existing box.
+    *   📦 Compact/Unbox: Stateful toggle that packs chained blocks into a single "Box" block or unpacks a selected box. Remembers the last group unboxed for easy re-boxing if no new selection is made.
 4. **Block Support:** 
     *   Currently supports Image blocks with full transparency and animation support (GIF, animated WebP, animated AVIF).
     *   **Box Blocks:** Specialized blocks that contain other blocks.
@@ -77,6 +77,7 @@ WINIT_UNIX_BACKEND=x11 cargo run
     *   **Drag-to-Box:** Single blocks can be dragged and dropped directly into a "Box" block to add them to the container.
     *   Boxing an existing "Box" block is not permitted (no nested containers).
     *   Unboxing restores all contained blocks to the main canvas.
+    *   **Smart Toggle:** The 📦 toolbar button acts as a toggle. If no blocks are selected, clicking it will either re-box the most recently unboxed group or unbox the most recently created group, allowing for quick "previewing" of unboxed content.
 9. **Counter Feature:**
     *   Each block has an optional counter (visible when > 0).
     *   Interact via the '#' button: LMB click to increment, RMB click to decrement.
