@@ -45,44 +45,45 @@ WINIT_UNIX_BACKEND=x11 cargo run
 
 ## User Requirements
 
-1. Whiteboard-type GUI desktop app (Linux/Pop!_Os/Cosmic-latest/Wayland) written in Rust.
-20. Keep code base well commented and structured for better readability and understanding.
-18. Development should be in small steps with user testing for each change and git commits.
-21. All temporary files/data created by app (if any) should be deleted/cleaned on app/session/block closure to prevent pollution.
-2. Canvas: Unlimited-vertical scrolling, dragging and resizing, canvas width is dynamic horizontally (it can change its width with main window resizing). 2d canvas with some reasonable boundaries to prevent edge cases.
-3. App has toolbar positioned on top of the canvas with icons that represent 
-actions (open/load session, save sesion, load image, create text block, allign blocks and others)
-3. Support for text and image blocks (gif, avif, webp with animation support). Image support: Static and animation formats.
-10. Animations: Click left mouse button (LMB) to toggle image animation.
-11. Image blocks spawn with original aspect ratio and maintain it during resize.
-4. Collision: Blocks cannot overlap (including new spawned blocks, grouped/'chained' blocks, and resized blocks), except while being moved, dragged or resized. 
-5. Align logic: rows grid alignment with wraping (simular to text words wraping) that resize blocks in each row to highest member value. 
-Alignment could be called on demand (toolbar icon click), on load (session load or images bulk load) and after manual resize/reposition of block(s).
-7. When two or more blocks are chained they have colored borders and can be moved or resized together.
-8. 'chained' mode dissapeares after 10 seconds of inactivity (no group dragging of resising) or on click outside of group, excluding 'chain' buttons (note that there is an edge case here: clicking outside current group but on 'chain' button shouldn't cancel current group 'chaning'. Therefore 'button clicked' event should be checked first.
-13. Right Mouse Button (RMB) hold and move anywhere inside a block resizes it (defaulting to the closest corner). The blocks should resize symmetrically around their center without moving across the window during the process.
-14. Resizing/moving is synchronized with mouse movement in real-time. 
-During group resizing blocks centeres should maintain/keep their's positions (user test edge case).
-15. 'Chained'/group resize mode allows to resize several blocks to same hight 
-(using hight of the block with mouse howered over) while preserving original ratio.
-16. **Controls & Mappings:**
-    *   **LMB + Drag:** Move blocks on canvas.
-    *   **RMB + Drag:** Resize block(s).
+1. **Platform:** Whiteboard-type GUI desktop app for Linux (Wayland/X11) and macOS, written in Rust using `eframe`/`egui`.
+2. **Canvas:** 
+    *   Unlimited vertical scrolling and 2D panning (MMB + Drag).
+    *   Dynamic horizontal width that reflows content based on window size or zoom level.
+    *   Zoom support (Ctrl + Scroll) affecting all canvas elements and layout.
+3. **Toolbar:** Positioned at the top with actions for:
+    *   💾 Save Session: Saves current blocks and their states to a JSON file.
+    *   📂 Load Session: Restores a previous session from a JSON file.
+    *   🖼 Add Image: Bulk load images (PNG, JPG, GIF, WebP, AVIF).
+    *   🔄 Reset Counters: Resets all block counters to zero.
+4. **Block Support:** 
+    *   Currently supports Image blocks with full transparency and animation support (GIF, animated WebP, animated AVIF).
+    *   Images spawn with original aspect ratio and maintain it during all operations.
+5. **Alignment & Layout:** 
+    *   Automatic row-based reflow logic with wrapping (similar to text).
+    *   Blocks are automatically reordered and reflowed after manual repositioning (drag stop) to maintain a clean grid.
+6. **Resizing:**
+    *   Symmetrical resizing around the block's center using RMB + Drag.
+    *   Real-time synchronization with mouse movement.
+    *   Minimum size constraints to prevent UI artifacts.
+7. **Chaining (Grouping):**
+    *   Toggle 'chain' mode for individual blocks via the 'o' button.
+    *   Chained blocks move together when any member of the group is dragged.
+    *   **Uniform Height:** Chained blocks maintain a synchronized height during resizing while preserving their individual aspect ratios.
+    *   Chaining is cancelled by clicking on the empty canvas.
+8. **Counter Feature:**
+    *   Each block has an optional counter (visible when > 0).
+    *   Interact via the '#' button: LMB click to increment, RMB click to decrement.
+9. **Controls & Mappings:**
+    *   **LMB + Drag:** Move blocks (triggers reflow on release).
+    *   **RMB + Drag:** Resize block(s) symmetrically.
     *   **MMB + Drag:** Pan the canvas.
-    *   **Cntrl + Scroll:** Zoom in/out (zooms background and all objects, text size). Notice that this should trigger auto alignment and resizing if block gets bigger than window size (same as with single/group block(s) resizing and window resizing.
-    *   **Mouse scroll:**  vertical srolling
-    *   **LMB + Click (animated formats only):** Toggle animation.
-    *   **Double Click (Text):** Edit text. (later)
-17. **Block UI:**
-    *   Top-right corner buttons (visible on hover/interaction):
-    *   'x': Close/Delete block.
-    *   'o': Chain/Unchain block.
-19. **Chaining (Grouping):**
-    *   Blocks with the 'chain' ('o') toggled on (green border) move and resize together as a group.
-    *   **Auto-Unchain:** If a chained group is inactive for 10 seconds, it automatically unchains (reverts to individual blocks).
-22.  Implemented uniform height for chained blocks - All chained blocks now maintain the same height during resizing
-4. Proper group resizing: When any chained block is resized, 
-all chained blocks adjust to match the new height while preserving their individual aspect ratios.
+    *   **Ctrl + Scroll:** Zoom in/out.
+    *   **Mouse Scroll:** Vertical scrolling.
+    *   **LMB Click (Image):** Toggle animation for supported formats.
+10. **Block UI (Hover/Interaction):**
+    *   'x': Delete/Close block.
+    *   'o': Toggle chaining.
+    *   '#': Increment/Decrement counter.
 
 
 
