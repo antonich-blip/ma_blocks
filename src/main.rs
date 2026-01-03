@@ -315,7 +315,10 @@ impl MaBlocksApp {
         );
         self.next_block_id += 1;
 
-        let mut group_block = ImageBlock::new_group(group_name, children, texture);
+        let representative_texture = children.first().map(|c| c.texture.clone());
+
+        let mut group_block =
+            ImageBlock::new_group(group_name, children, texture, representative_texture);
         group_block.position = min_pos;
         self.blocks.insert(0, group_block);
         self.reflow_blocks();
@@ -399,10 +402,9 @@ impl MaBlocksApp {
                 Color32::from_rgb(60, 60, 60)
             };
             painter.rect_filled(image_rect, rounding, fill_color);
-            painter.rect_stroke(image_rect, rounding, (1.0 * zoom, block.color));
 
             // Folder-like icon (simplified)
-            let folder_rect = Rect::from_center_size(image_rect.center(), image_rect.size() * 0.6);
+            let folder_rect = Rect::from_center_size(image_rect.center(), image_rect.size() * 0.9);
             painter.rect_filled(folder_rect, egui::Rounding::same(2.0 * zoom), block.color);
             painter.rect_filled(
                 Rect::from_min_max(
@@ -413,13 +415,24 @@ impl MaBlocksApp {
                 block.color,
             );
 
-            painter.text(
-                image_rect.center() + vec2(0.0, image_rect.height() * 0.35),
-                Align2::CENTER_CENTER,
-                &block.group_name,
-                FontId::proportional(12.0 * zoom),
-                Color32::WHITE,
-            );
+            // Representative image tag - centered
+            if let Some(rep_texture) = &block.representative_texture {
+                let tag_size = image_rect.size() * 0.8;
+                let tag_rect = Rect::from_center_size(image_rect.center(), tag_size);
+                let mut tag_shape = egui::epaint::RectShape::filled(
+                    tag_rect,
+                    egui::Rounding::same(2.0 * zoom),
+                    Color32::WHITE,
+                );
+                tag_shape.fill_texture_id = rep_texture.id();
+                tag_shape.uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+                painter.add(tag_shape);
+                painter.rect_stroke(
+                    tag_rect,
+                    egui::Rounding::same(2.0 * zoom),
+                    (1.0 * zoom, Color32::WHITE.gamma_multiply(0.8)),
+                );
+            }
         } else {
             let mut rect_shape =
                 egui::epaint::RectShape::filled(image_rect, rounding, Color32::WHITE);
@@ -969,7 +982,10 @@ impl MaBlocksApp {
             );
             self.next_block_id += 1;
 
-            let mut group = ImageBlock::new_group(data.group_name, children, texture);
+            let representative_texture = children.first().map(|c| c.texture.clone());
+
+            let mut group =
+                ImageBlock::new_group(data.group_name, children, texture, representative_texture);
             group.id = data.id;
             group.color = Color32::from_rgba_unmultiplied(
                 data.color[0],

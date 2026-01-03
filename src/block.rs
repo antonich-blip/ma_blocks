@@ -3,7 +3,7 @@ use eframe::egui::{self, Pos2, Rect, Vec2};
 use std::time::Duration;
 use uuid::Uuid;
 
-pub const BLOCK_PADDING: f32 = 8.0;
+pub const BLOCK_PADDING: f32 = 4.0;
 
 pub struct ImageBlock {
     pub id: Uuid,
@@ -25,6 +25,7 @@ pub struct ImageBlock {
     pub is_group: bool,
     pub group_name: String,
     pub children: Vec<ImageBlock>,
+    pub representative_texture: Option<egui::TextureHandle>,
 }
 
 impl ImageBlock {
@@ -61,6 +62,7 @@ impl ImageBlock {
             is_group: false,
             group_name: String::new(),
             children: Vec::new(),
+            representative_texture: None,
         }
     }
 
@@ -68,8 +70,9 @@ impl ImageBlock {
         name: String,
         children: Vec<ImageBlock>,
         texture: egui::TextureHandle,
+        representative_texture: Option<egui::TextureHandle>,
     ) -> Self {
-        let image_size = egui::vec2(80.0, 80.0);
+        let image_size = egui::vec2(160.0, 160.0);
         let id = Uuid::new_v4();
         let color = color_from_uuid(id);
         Self {
@@ -92,6 +95,7 @@ impl ImageBlock {
             is_group: true,
             group_name: name,
             children,
+            representative_texture,
         }
     }
 
