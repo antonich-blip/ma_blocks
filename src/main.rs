@@ -341,6 +341,38 @@ impl MaBlocksApp {
         self.reflow_blocks();
     }
 
+    fn drop_block_into_box(&mut self, block_idx: usize, box_idx: usize) {
+        let mut block = self.blocks.remove(block_idx);
+        block.is_dragging = false;
+        block.chained = false;
+
+        let target_box_idx = if box_idx > block_idx {
+            box_idx - 1
+        } else {
+            box_idx
+        };
+        let box_block = &mut self.blocks[target_box_idx];
+
+        if box_block.representative_texture.is_none() {
+            box_block.representative_texture = Some(block.texture.clone());
+        }
+
+        box_block.children.push(block);
+
+        // Update group name
+        if box_block.children.len() > 1 {
+            box_block.group_name = format!("Group of {}", box_block.children.len());
+        } else if box_block.children.len() == 1 {
+            box_block.group_name = format!(
+                "Box: {}",
+                Path::new(&box_block.children[0].path)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("unnamed")
+            );
+        }
+    }
+
     fn toggle_compact_group(&mut self, ctx: &egui::Context) {
         let chained: Vec<&ImageBlock> = self.blocks.iter().filter(|b| b.chained).collect();
 
@@ -873,6 +905,29 @@ impl eframe::App for MaBlocksApp {
 
                         if self.blocks[index].is_dragging && response.drag_stopped() {
                             self.blocks[index].is_dragging = false;
+
+                            let mut dropped_into_box = false;
+                            if !self.blocks[index].is_group {
+                                if let Some(m_pos) = ui.input(|i| i.pointer.interact_pos()) {
+                                    let world_mouse = (m_pos - canvas_origin) / zoom;
+                                    let target_idx = self.blocks.iter().position(|other| {
+                                        other.id != self.blocks[index].id
+                                            && other.is_group
+                                            && other.rect().contains(world_mouse.to_pos2())
+                                    });
+
+                                    if let Some(t_idx) = target_idx {
+                                        self.drop_block_into_box(index, t_idx);
+                                        dropped_into_box = true;
+                                        should_reflow = true;
+                                    }
+                                }
+                            }
+
+                            if dropped_into_box {
+                                continue;
+                            }
+
                             should_reorder = true;
                         }
 

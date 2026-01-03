@@ -55,8 +55,10 @@ WINIT_UNIX_BACKEND=x11 cargo run
     *   📂 Load Session: Restores a previous session from a JSON file.
     *   🖼 Add Image: Bulk load images (PNG, JPG, GIF, WebP, AVIF).
     *   🔄 Reset Counters: Resets all block counters to zero.
+    *   📦 Compact/Unbox: Packs chained blocks into a single "Box" block or unpacks an existing box.
 4. **Block Support:** 
     *   Currently supports Image blocks with full transparency and animation support (GIF, animated WebP, animated AVIF).
+    *   **Box Blocks:** Specialized blocks that contain other blocks.
     *   Images spawn with original aspect ratio and maintain it during all operations.
 5. **Alignment & Layout:** 
     *   Automatic row-based reflow logic with wrapping (similar to text).
@@ -70,17 +72,22 @@ WINIT_UNIX_BACKEND=x11 cargo run
     *   Chained blocks move together when any member of the group is dragged.
     *   **Uniform Height:** Chained blocks maintain a synchronized height during resizing while preserving their individual aspect ratios.
     *   Chaining is cancelled by clicking on the empty canvas.
-8. **Counter Feature:**
+8. **Boxing & Containers:**
+    *   Chained blocks can be packed into a "Box" block using the 📦 toolbar button.
+    *   **Drag-to-Box:** Single blocks can be dragged and dropped directly into a "Box" block to add them to the container.
+    *   Boxing an existing "Box" block is not permitted (no nested containers).
+    *   Unboxing restores all contained blocks to the main canvas.
+9. **Counter Feature:**
     *   Each block has an optional counter (visible when > 0).
     *   Interact via the '#' button: LMB click to increment, RMB click to decrement.
-9. **Controls & Mappings:**
-    *   **LMB + Drag:** Move blocks (triggers reflow on release).
+10. **Controls & Mappings:**
+    *   **LMB + Drag:** Move blocks (triggers reflow on release or drop into box).
     *   **RMB + Drag:** Resize block(s) symmetrically.
     *   **MMB + Drag:** Pan the canvas.
     *   **Ctrl + Scroll:** Zoom in/out.
     *   **Mouse Scroll:** Vertical scrolling.
     *   **LMB Click (Image):** Toggle animation for supported formats.
-10. **Block UI (Hover/Interaction):**
+11. **Block UI (Hover/Interaction):**
     *   'x': Delete/Close block.
     *   'o': Toggle chaining.
     *   '#': Increment/Decrement counter.
