@@ -86,6 +86,8 @@ struct MaBlocksApp {
     working_inner_width: f32,
     session_file: Option<PathBuf>,
     zoom: f32,
+    last_unboxed_ids: Vec<Uuid>,
+    last_boxed_id: Option<Uuid>,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -143,6 +145,8 @@ impl MaBlocksApp {
             working_inner_width: CANVAS_WORKING_WIDTH,
             session_file: None,
             zoom: 1.0,
+            last_unboxed_ids: Vec::new(),
+            last_boxed_id: None,
         }
     }
 
@@ -266,7 +270,7 @@ impl MaBlocksApp {
         self.skip_chain_cancel = true;
     }
 
-    fn box_group(&mut self, ctx: &egui::Context) {
+    fn box_group(&mut self, ctx: &egui::Context) -> Uuid {
         let mut chained_indices: Vec<usize> = self
             .blocks
             .iter()
@@ -276,7 +280,7 @@ impl MaBlocksApp {
             .collect();
 
         if chained_indices.is_empty() {
-            return;
+            return Uuid::nil();
         }
 
         // Sort indices in descending order to remove from blocks safely
@@ -320,8 +324,10 @@ impl MaBlocksApp {
         let mut group_block =
             ImageBlock::new_group(group_name, children, texture, representative_texture);
         group_block.position = min_pos;
+        let new_id = group_block.id;
         self.blocks.insert(0, group_block);
         self.reflow_blocks();
+        new_id
     }
 
     fn unbox_group(&mut self, index: usize) {
@@ -374,13 +380,45 @@ impl MaBlocksApp {
     }
 
     fn toggle_compact_group(&mut self, ctx: &egui::Context) {
+        let chained_count = self.blocks.iter().filter(|b| b.chained).count();
+
+        // If nothing is chained, try to toggle the last state
+        if chained_count == 0 {
+            if !self.last_unboxed_ids.is_empty() {
+                let mut found_any = false;
+                for block in &mut self.blocks {
+                    if self.last_unboxed_ids.contains(&block.id) {
+                        block.chained = true;
+                        found_any = true;
+                    }
+                }
+                if found_any {
+                    self.last_boxed_id = Some(self.box_group(ctx));
+                    self.last_unboxed_ids.clear();
+                    return;
+                }
+            } else if let Some(last_id) = self.last_boxed_id {
+                if let Some(idx) = self.blocks.iter().position(|b| b.id == last_id) {
+                    self.last_unboxed_ids =
+                        self.blocks[idx].children.iter().map(|c| c.id).collect();
+                    self.unbox_group(idx);
+                    self.last_boxed_id = None;
+                    return;
+                }
+            }
+        }
+
         let chained: Vec<&ImageBlock> = self.blocks.iter().filter(|b| b.chained).collect();
 
         if chained.len() == 1 && chained[0].is_group {
             let idx = self.blocks.iter().position(|b| b.chained).unwrap();
+            // Store children IDs before unboxing
+            self.last_unboxed_ids = self.blocks[idx].children.iter().map(|c| c.id).collect();
             self.unbox_group(idx);
+            self.last_boxed_id = None;
         } else if !chained.is_empty() {
-            self.box_group(ctx);
+            self.last_boxed_id = Some(self.box_group(ctx));
+            self.last_unboxed_ids.clear();
         }
     }
 
