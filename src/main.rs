@@ -894,7 +894,9 @@ impl eframe::App for MaBlocksApp {
                         );
 
                         if primary_clicked && response.clicked() && !any_button_hovered {
-                            if self.blocks[index].frames.len() > 1 {
+                            if ui.input(|i| i.modifiers.ctrl) {
+                                self.toggle_chain_for_block(index);
+                            } else if self.blocks[index].frames.len() > 1 {
                                 self.blocks[index].toggle_animation();
                             }
                         }
