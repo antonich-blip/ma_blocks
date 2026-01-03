@@ -73,6 +73,8 @@ struct BlockData {
     #[serde(default)]
     group_name: String,
     #[serde(default)]
+    color: [u8; 4],
+    #[serde(default)]
     children: Vec<BlockData>,
 }
 
@@ -315,16 +317,22 @@ impl MaBlocksApp {
 
         let mut group_block = ImageBlock::new_group(group_name, children, texture);
         group_block.position = min_pos;
-        self.blocks.push(group_block);
+        self.blocks.insert(0, group_block);
         self.reflow_blocks();
     }
 
     fn unbox_group(&mut self, index: usize) {
         let group = self.blocks.remove(index);
         if group.is_group {
-            for mut child in group.children {
+            // Find the index after all currently existing groups
+            let insert_idx = self
+                .blocks
+                .iter()
+                .position(|b| !b.is_group)
+                .unwrap_or(self.blocks.len());
+            for (i, mut child) in group.children.into_iter().enumerate() {
                 child.chained = false;
-                self.blocks.push(child);
+                self.blocks.insert(insert_idx + i, child);
             }
         }
         self.reflow_blocks();
@@ -391,18 +399,18 @@ impl MaBlocksApp {
                 Color32::from_rgb(60, 60, 60)
             };
             painter.rect_filled(image_rect, rounding, fill_color);
-            painter.rect_stroke(image_rect, rounding, (1.0 * zoom, Color32::GOLD));
+            painter.rect_stroke(image_rect, rounding, (1.0 * zoom, block.color));
 
             // Folder-like icon (simplified)
             let folder_rect = Rect::from_center_size(image_rect.center(), image_rect.size() * 0.6);
-            painter.rect_filled(folder_rect, egui::Rounding::same(2.0 * zoom), Color32::GOLD);
+            painter.rect_filled(folder_rect, egui::Rounding::same(2.0 * zoom), block.color);
             painter.rect_filled(
                 Rect::from_min_max(
                     folder_rect.left_top() - vec2(0.0, 5.0 * zoom),
                     folder_rect.left_top() + vec2(folder_rect.width() * 0.4, 0.0),
                 ),
                 egui::Rounding::same(1.0 * zoom),
-                Color32::GOLD,
+                block.color,
             );
 
             painter.text(
@@ -941,6 +949,7 @@ impl MaBlocksApp {
             counter: b.counter,
             is_group: b.is_group,
             group_name: b.group_name.clone(),
+            color: b.color.to_array(),
             children: b.children.iter().map(|c| self.block_to_data(c)).collect(),
         }
     }
@@ -962,6 +971,12 @@ impl MaBlocksApp {
 
             let mut group = ImageBlock::new_group(data.group_name, children, texture);
             group.id = data.id;
+            group.color = Color32::from_rgba_unmultiplied(
+                data.color[0],
+                data.color[1],
+                data.color[2],
+                data.color[3],
+            );
             group.position = pos2(data.position[0], data.position[1]);
             group.set_preferred_size(vec2(data.size[0], data.size[1]));
             group.chained = data.chained;
@@ -974,6 +989,12 @@ impl MaBlocksApp {
                 if let Ok(_) = self.insert_block_from_path(ctx, path_buf) {
                     if let Some(mut block) = self.blocks.pop() {
                         block.id = data.id;
+                        block.color = Color32::from_rgba_unmultiplied(
+                            data.color[0],
+                            data.color[1],
+                            data.color[2],
+                            data.color[3],
+                        );
                         block.position = pos2(data.position[0], data.position[1]);
                         block.set_preferred_size(vec2(data.size[0], data.size[1]));
                         block.chained = data.chained;

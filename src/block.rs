@@ -19,6 +19,7 @@ pub struct ImageBlock {
     pub image_size: Vec2,
     pub preferred_image_size: Vec2,
     pub aspect_ratio: f32,
+    pub color: egui::Color32,
     pub chained: bool,
     pub counter: i32,
     pub is_group: bool,
@@ -38,8 +39,10 @@ impl ImageBlock {
         } else {
             1.0
         };
+        let id = Uuid::new_v4();
+        let color = color_from_uuid(id);
         Self {
-            id: Uuid::new_v4(),
+            id,
             path,
             texture,
             frames,
@@ -52,6 +55,7 @@ impl ImageBlock {
             image_size,
             preferred_image_size: image_size,
             aspect_ratio,
+            color,
             chained: false,
             counter: 0,
             is_group: false,
@@ -66,8 +70,10 @@ impl ImageBlock {
         texture: egui::TextureHandle,
     ) -> Self {
         let image_size = egui::vec2(80.0, 80.0);
+        let id = Uuid::new_v4();
+        let color = color_from_uuid(id);
         Self {
-            id: Uuid::new_v4(),
+            id,
             path: String::new(),
             texture,
             frames: Vec::new(),
@@ -80,6 +86,7 @@ impl ImageBlock {
             image_size,
             preferred_image_size: image_size,
             aspect_ratio: 1.0,
+            color,
             chained: false,
             counter: 0,
             is_group: true,
@@ -161,4 +168,13 @@ impl ImageBlock {
             self.texture.set(first.image, egui::TextureOptions::LINEAR);
         }
     }
+}
+
+fn color_from_uuid(id: Uuid) -> egui::Color32 {
+    let b = id.as_bytes();
+    // Generate a vibrant color from the UUID bytes
+    let h = (b[0] as f32 + b[1] as f32 * 256.0) / 65535.0;
+    let s = 0.6 + (b[2] as f32 / 255.0) * 0.4;
+    let l = 0.5 + (b[3] as f32 / 255.0) * 0.2;
+    egui::Color32::from(egui::epaint::Hsva::new(h, s, l, 1.0))
 }
