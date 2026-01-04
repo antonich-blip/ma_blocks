@@ -88,6 +88,7 @@ struct MaBlocksApp {
     zoom: f32,
     last_unboxed_ids: Vec<Uuid>,
     last_boxed_id: Option<Uuid>,
+    show_file_names: bool,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -147,6 +148,7 @@ impl MaBlocksApp {
             zoom: 1.0,
             last_unboxed_ids: Vec::new(),
             last_boxed_id: None,
+            show_file_names: false,
         }
     }
 
@@ -586,6 +588,33 @@ impl MaBlocksApp {
                 Color32::WHITE,
             );
         }
+
+        if self.show_file_names {
+            let name = if block.is_group {
+                &block.group_name
+            } else {
+                Path::new(&block.path)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("unnamed")
+            };
+
+            let font_id = FontId::proportional(12.0 * zoom);
+            let galley = ui
+                .painter()
+                .layout_no_wrap(name.to_string(), font_id, Color32::WHITE);
+
+            // Position at top-left of the image with a small margin
+            let text_pos = image_rect.left_top() + vec2(4.0 * zoom, 4.0 * zoom);
+            let text_rect = Rect::from_min_size(text_pos, galley.size());
+
+            painter.rect_filled(
+                text_rect.expand(2.0 * zoom),
+                egui::Rounding::same(2.0 * zoom),
+                Color32::from_black_alpha(180),
+            );
+            painter.galley(text_pos, galley, Color32::WHITE);
+        }
     }
 
     fn handle_resizing(&mut self, curr_mouse_pos: Pos2) {
@@ -664,6 +693,10 @@ impl MaBlocksApp {
 
 impl eframe::App for MaBlocksApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::N)) {
+            self.show_file_names = !self.show_file_names;
+        }
+
         let dt = ctx.input(|i| i.unstable_dt).max(0.0);
         self.advance_animations(dt, ctx);
         self.enforce_chain_constraints();
