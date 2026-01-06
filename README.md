@@ -93,7 +93,13 @@ WINIT_UNIX_BACKEND=x11 cargo run
     *   'o': Toggle chaining.
     *   '#': Increment/Decrement counter.
 
-
-
+## ToDos
+- [ ]  proper realignment with keeping order on  drag + drop of a group of blocks
+- [ ]  drop group of blocks into a box
+- [ ]  remember last group/'chain'. selecting one of the remembered member triggers auato selecting others
+- [ ]  sound options
+- [ ]  text over blocks options
+- [ ]  Windows support
+- [ ]  Mobile support
 
 
