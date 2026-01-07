@@ -68,10 +68,11 @@ WINIT_UNIX_BACKEND=x11 cargo run
     *   Real-time synchronization with mouse movement.
     *   Minimum size constraints to prevent UI artifacts.
 7. **Chaining (Grouping):**
-    *   Toggle 'chain' mode for individual blocks via the 'o' button.
+    *   Toggle 'chain' mode for individual blocks via the 'o' button or Ctrl+Click.
     *   Chained blocks move together when any member of the group is dragged.
     *   **Uniform Height:** Chained blocks maintain a synchronized height during resizing while preserving their individual aspect ratios.
     *   Chaining is cancelled by clicking on the empty canvas.
+    *   **Remembered Chains:** When a chain of 2+ blocks is cleared, it is automatically remembered. Selecting any member of a previously chained group will auto-select all other members of that group. This feature is session-persistent.
 8. **Boxing & Containers:**
     *   Chained blocks can be packed into a "Box" block using the 📦 toolbar button.
     *   **Drag-to-Box:** Single blocks can be dragged and dropped directly into a "Box" block to add them to the container.
@@ -96,7 +97,7 @@ WINIT_UNIX_BACKEND=x11 cargo run
 ## ToDos
 - [ ]  proper realignment with keeping order on  drag + drop of a group of blocks
 - [ ]  drop group of blocks into a box
-- [ ]  remember last group/'chain'. selecting one of the remembered member triggers auato selecting others
+- [x]  remember  group/'chain'. selecting one of the remembered member triggers auto selecting other members (this feature is session persistent)
 - [ ]  sound options
 - [ ]  text over blocks options
 - [ ]  Windows support

@@ -7,6 +7,7 @@ use egui::{pos2, vec2};
 use image_loader::load_image_frames;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use uuid::Uuid;
@@ -57,6 +58,8 @@ struct InteractionState {
 #[derive(Serialize, Deserialize)]
 struct Session {
     blocks: Vec<BlockData>,
+    #[serde(default)]
+    remembered_chains: Vec<Vec<String>>, // Vec of chain groups, each containing block UUIDs as strings
 }
 
 #[derive(Serialize, Deserialize)]
@@ -89,6 +92,8 @@ struct MaBlocksApp {
     last_unboxed_ids: Vec<Uuid>,
     last_boxed_id: Option<Uuid>,
     show_file_names: bool,
+    /// Remembered chain groups - selecting one member auto-selects others
+    remembered_chains: Vec<HashSet<Uuid>>,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -149,6 +154,7 @@ impl MaBlocksApp {
             last_unboxed_ids: Vec::new(),
             last_boxed_id: None,
             show_file_names: false,
+            remembered_chains: Vec::new(),
         }
     }
 
@@ -255,10 +261,26 @@ impl MaBlocksApp {
     }
 
     fn clear_chain_group(&mut self) {
-        if self.blocks.iter().any(|b| b.chained) {
-            for block in &mut self.blocks {
-                block.chained = false;
-            }
+        // Collect IDs of currently chained blocks to remember
+        let chained_ids: HashSet<Uuid> = self
+            .blocks
+            .iter()
+            .filter(|b| b.chained)
+            .map(|b| b.id)
+            .collect();
+
+        // Only save if there are at least 2 chained blocks (a real group)
+        if chained_ids.len() >= 2 {
+            // Remove any existing remembered chains that overlap with this one
+            self.remembered_chains
+                .retain(|chain| chain.is_disjoint(&chained_ids));
+            // Add the new remembered chain
+            self.remembered_chains.push(chained_ids);
+        }
+
+        // Clear the chain
+        for block in &mut self.blocks {
+            block.chained = false;
         }
         self.skip_chain_cancel = false;
     }
@@ -268,7 +290,34 @@ impl MaBlocksApp {
             return;
         }
 
-        self.blocks[index].chained = !self.blocks[index].chained;
+        let block_id = self.blocks[index].id;
+        let was_chained = self.blocks[index].chained;
+
+        // If turning ON chain, check if this block belongs to a remembered chain
+        if !was_chained {
+            // Find a remembered chain containing this block
+            let remembered_chain = self
+                .remembered_chains
+                .iter()
+                .find(|chain| chain.contains(&block_id))
+                .cloned();
+
+            if let Some(chain_ids) = remembered_chain {
+                // Auto-chain all members of the remembered group
+                for block in &mut self.blocks {
+                    if chain_ids.contains(&block.id) {
+                        block.chained = true;
+                    }
+                }
+            } else {
+                // No remembered chain, just toggle this block
+                self.blocks[index].chained = true;
+            }
+        } else {
+            // Turning OFF - just toggle this block
+            self.blocks[index].chained = false;
+        }
+
         self.skip_chain_cancel = true;
     }
 
@@ -1065,6 +1114,11 @@ impl MaBlocksApp {
         {
             let session = Session {
                 blocks: self.blocks.iter().map(|b| self.block_to_data(b)).collect(),
+                remembered_chains: self
+                    .remembered_chains
+                    .iter()
+                    .map(|chain| chain.iter().map(|id| id.to_string()).collect())
+                    .collect(),
             };
 
             if let Ok(file) = std::fs::File::create(&path) {
@@ -1164,6 +1218,18 @@ impl MaBlocksApp {
                             self.blocks.push(block);
                         }
                     }
+                    // Load remembered chains
+                    self.remembered_chains = session
+                        .remembered_chains
+                        .into_iter()
+                        .map(|chain| {
+                            chain
+                                .into_iter()
+                                .filter_map(|s| Uuid::parse_str(&s).ok())
+                                .collect()
+                        })
+                        .filter(|chain: &HashSet<Uuid>| chain.len() >= 2)
+                        .collect();
                     self.session_file = Some(path);
                     self.reflow_blocks();
                 }
