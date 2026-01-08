@@ -95,12 +95,13 @@ WINIT_UNIX_BACKEND=x11 cargo run
     *   '#': Increment/Decrement counter.
 
 ## ToDos
-- [ ]  proper realignment with keeping order on  drag + drop of a group of blocks
+- [x]  proper realignment with keeping order on  drag + drop of a group of blocks
 - [ ]  drop group of blocks into a box
 - [x]  remember  group/'chain'. selecting one of the remembered member triggers auto selecting other members (this feature is session persistent)
 - [ ]  sound options
 - [ ]  text over blocks options
 - [ ]  Windows support
 - [ ]  Mobile support
+- [ ]  make 'reset' button to reset counter bubbles inside boxes too
 
 

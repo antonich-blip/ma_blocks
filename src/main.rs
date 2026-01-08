@@ -473,22 +473,103 @@ impl MaBlocksApp {
         }
     }
 
-    fn reorder_and_reflow(&mut self) {
-        self.blocks.sort_by(|a, b| {
-            // Bucket Y coordinates to group blocks into "rows" for sorting.
-            // This allows for some vertical drift during dragging without jumping rows.
-            let a_y_q = (a.position.y / 100.0) as i32;
-            let b_y_q = (b.position.y / 100.0) as i32;
+    fn reorder_and_reflow(&mut self, leader_id: Option<Uuid>) {
+        if let Some(leader_id) = leader_id {
+            // Identify moved group
+            let is_leader_chained = self
+                .blocks
+                .iter()
+                .find(|b| b.id == leader_id)
+                .map(|b| b.chained)
+                .unwrap_or(false);
 
-            match a_y_q.cmp(&b_y_q) {
-                Ordering::Equal => a
-                    .position
-                    .x
-                    .partial_cmp(&b.position.x)
-                    .unwrap_or(Ordering::Equal),
-                ord => ord,
+            let mut moved_group = Vec::new();
+            let mut remaining = Vec::new();
+
+            // We must preserve the relative order in self.blocks
+            let leader_idx_in_group = self
+                .blocks
+                .iter()
+                .enumerate()
+                .find(|(_, b)| b.id == leader_id)
+                .map(|(i, _)| i);
+
+            if leader_idx_in_group.is_none() {
+                return;
             }
-        });
+
+            for block in self.blocks.drain(..) {
+                let is_moved = if is_leader_chained {
+                    block.chained
+                } else {
+                    block.id == leader_id
+                };
+
+                if is_moved {
+                    moved_group.push(block);
+                } else {
+                    remaining.push(block);
+                }
+            }
+
+            if moved_group.is_empty() {
+                self.blocks = remaining;
+                self.reflow_blocks();
+                return;
+            }
+
+            // Find where the leader ended up
+            let leader_pos = moved_group
+                .iter()
+                .find(|b| b.id == leader_id)
+                .unwrap()
+                .position;
+
+            // Sort remaining by current position to find insertion point correctly
+            remaining.sort_by(|a, b| {
+                let a_y_q = (a.position.y / 100.0) as i32;
+                let b_y_q = (b.position.y / 100.0) as i32;
+                match a_y_q.cmp(&b_y_q) {
+                    Ordering::Equal => a
+                        .position
+                        .x
+                        .partial_cmp(&b.position.x)
+                        .unwrap_or(Ordering::Equal),
+                    ord => ord,
+                }
+            });
+
+            let mut insert_idx = remaining.len();
+            for (i, b) in remaining.iter().enumerate() {
+                let b_y_q = (b.position.y / 100.0) as i32;
+                let leader_y_q = (leader_pos.y / 100.0) as i32;
+
+                if leader_y_q < b_y_q || (leader_y_q == b_y_q && leader_pos.x < b.position.x) {
+                    insert_idx = i;
+                    break;
+                }
+            }
+
+            // Re-assemble
+            self.blocks = remaining;
+            for (i, block) in moved_group.into_iter().enumerate() {
+                self.blocks.insert(insert_idx + i, block);
+            }
+        } else {
+            // Old sorting logic as fallback
+            self.blocks.sort_by(|a, b| {
+                let a_y_q = (a.position.y / 100.0) as i32;
+                let b_y_q = (b.position.y / 100.0) as i32;
+                match a_y_q.cmp(&b_y_q) {
+                    Ordering::Equal => a
+                        .position
+                        .x
+                        .partial_cmp(&b.position.x)
+                        .unwrap_or(Ordering::Equal),
+                    ord => ord,
+                }
+            });
+        }
         self.reflow_blocks();
     }
 
@@ -821,7 +902,7 @@ impl eframe::App for MaBlocksApp {
                 });
             });
 
-        let mut should_reorder = false;
+        let mut dropped_leader_id = None;
         let mut should_reflow = false;
         egui::CentralPanel::default().show(ctx, |ui| {
             // Zoom handling: Ctrl + Scroll
@@ -1048,7 +1129,7 @@ impl eframe::App for MaBlocksApp {
                                 continue;
                             }
 
-                            should_reorder = true;
+                            dropped_leader_id = Some(self.blocks[index].id);
                         }
 
                         let show_controls = is_hovering_block
@@ -1097,8 +1178,8 @@ impl eframe::App for MaBlocksApp {
                 });
         });
 
-        if should_reorder {
-            self.reorder_and_reflow();
+        if let Some(leader_id) = dropped_leader_id {
+            self.reorder_and_reflow(Some(leader_id));
         } else if should_reflow {
             self.reflow_blocks();
         }
