@@ -101,29 +101,19 @@ struct BlockControlHover {
     close_hovered: bool,
     chain_hovered: bool,
     counter_hovered: bool,
+    reset_hovered: bool,
 }
 
-fn block_control_rects(rect: Rect, block: &ImageBlock, zoom: f32) -> (Rect, Rect, Rect) {
-    let image_rect = Rect::from_min_size(
-        pos2(
-            rect.min.x + BLOCK_PADDING * zoom,
-            rect.min.y + BLOCK_PADDING * zoom,
-        ),
-        block.image_size * zoom,
-    );
-
-    let btn_draw_size = 16.0 * zoom;
-    let btn_hit_size = btn_draw_size.max(20.0); // Minimum hit area
-    let margin_top = 12.0 * zoom;
-    let margin_right = 12.0 * zoom;
-    let btn_spacing = 6.0 * zoom;
-    let top_right = image_rect.right_top();
+fn block_control_rects(rect: Rect, _block: &ImageBlock, zoom: f32) -> (Rect, Rect, Rect, Rect) {
+    let btn_size = 16.0 * zoom;
+    let btn_spacing = 4.0 * zoom;
+    let btn_hit_size = btn_size * 1.2;
 
     let close_rect = Rect::from_center_size(
-        top_right
+        rect.right_top()
             + Vec2::new(
-                -margin_right - btn_draw_size / 2.0,
-                margin_top + btn_draw_size / 2.0,
+                -btn_hit_size / 2.0 - 4.0 * zoom,
+                btn_hit_size / 2.0 + 4.0 * zoom,
             ),
         Vec2::splat(btn_hit_size),
     );
@@ -138,7 +128,12 @@ fn block_control_rects(rect: Rect, block: &ImageBlock, zoom: f32) -> (Rect, Rect
         Vec2::splat(btn_hit_size),
     );
 
-    (close_rect, chain_rect, counter_rect)
+    let reset_rect = Rect::from_center_size(
+        counter_rect.center() - Vec2::new(btn_hit_size + btn_spacing, 0.0),
+        Vec2::splat(btn_hit_size),
+    );
+
+    (close_rect, chain_rect, counter_rect, reset_rect)
 }
 
 impl MaBlocksApp {
@@ -639,7 +634,8 @@ impl MaBlocksApp {
         }
 
         if show_controls {
-            let (close_rect, chain_rect, counter_rect) = block_control_rects(rect, block, zoom);
+            let (close_rect, chain_rect, counter_rect, reset_rect) =
+                block_control_rects(rect, block, zoom);
             // block_control_rects already uses the passed rect which is scaled
 
             let btn_size = 16.0 * zoom; // Use the same size for drawing
@@ -693,6 +689,23 @@ impl MaBlocksApp {
                 counter_rect.center(),
                 Align2::CENTER_CENTER,
                 "#",
+                FontId::monospace(12.0 * zoom),
+                Color32::WHITE,
+            );
+
+            painter.circle_filled(
+                reset_rect.center(),
+                btn_size / 2.0,
+                if hover_state.reset_hovered {
+                    Color32::from_rgb(150, 150, 150)
+                } else {
+                    Color32::from_rgb(100, 100, 100)
+                },
+            );
+            painter.text(
+                reset_rect.center(),
+                Align2::CENTER_CENTER,
+                "r",
                 FontId::monospace(12.0 * zoom),
                 Color32::WHITE,
             );
@@ -983,7 +996,7 @@ impl eframe::App for MaBlocksApp {
                         .translate(canvas_origin.to_vec2());
 
                         let block = &self.blocks[index];
-                        let (close_rect, chain_rect, counter_rect) =
+                        let (close_rect, chain_rect, counter_rect, reset_rect) =
                             block_control_rects(block_rect, block, zoom);
 
                         let block_id = canvas_ui.id().with(block.id);
@@ -997,11 +1010,13 @@ impl eframe::App for MaBlocksApp {
                             close_hovered: mouse_pos.is_some_and(|p| close_rect.contains(p)),
                             chain_hovered: mouse_pos.is_some_and(|p| chain_rect.contains(p)),
                             counter_hovered: mouse_pos.is_some_and(|p| counter_rect.contains(p)),
+                            reset_hovered: mouse_pos.is_some_and(|p| reset_rect.contains(p)),
                         };
 
                         let any_button_hovered = hover_state.close_hovered
                             || hover_state.chain_hovered
-                            || hover_state.counter_hovered;
+                            || hover_state.counter_hovered
+                            || hover_state.reset_hovered;
 
                         // Sense clicks manually to avoid egui widget capture issues
                         let primary_clicked =
@@ -1019,6 +1034,9 @@ impl eframe::App for MaBlocksApp {
                                 // toggle_chain_for_block already sets skip_chain_cancel
                             } else if hover_state.counter_hovered {
                                 self.blocks[index].counter += 1;
+                                self.skip_chain_cancel = true;
+                            } else if hover_state.reset_hovered {
+                                self.blocks[index].reset_counters_recursive();
                                 self.skip_chain_cancel = true;
                             }
                         }
@@ -1320,7 +1338,7 @@ impl MaBlocksApp {
 
     fn reset_all_counters(&mut self) {
         for block in &mut self.blocks {
-            block.counter = 0;
+            block.reset_counters_recursive();
         }
     }
 }

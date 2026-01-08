@@ -63,6 +63,7 @@ WINIT_UNIX_BACKEND=x11 cargo run
 5. **Alignment & Layout:** 
     *   Automatic row-based reflow logic with wrapping (similar to text).
     *   Blocks are automatically reordered and reflowed after manual repositioning (drag stop) to maintain a clean grid.
+    After block (or a group of chained blocks) is dropped, it is treated as a single unit. The entire group is extracted from the block list, preserving its internal relative order, and then inserted into the new position as a continuous sequence
 6. **Resizing:**
     *   Symmetrical resizing around the block's center using RMB + Drag.
     *   Real-time synchronization with mouse movement.
@@ -96,12 +97,12 @@ WINIT_UNIX_BACKEND=x11 cargo run
 
 ## ToDos
 - [x]  proper realignment with keeping order on  drag + drop of a group of blocks
-- [ ]  drop group of blocks into a box
+- [ ]  make 'reset' button to reset counter bubbles inside boxes too
+- [ ]  drop group of blocks into a box with proper visual effects
 - [x]  remember  group/'chain'. selecting one of the remembered member triggers auto selecting other members (this feature is session persistent)
 - [ ]  sound options
 - [ ]  text over blocks options
 - [ ]  Windows support
 - [ ]  Mobile support
-- [ ]  make 'reset' button to reset counter bubbles inside boxes too
 
 

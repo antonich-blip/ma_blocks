@@ -172,6 +172,13 @@ impl ImageBlock {
             self.texture.set(first.image, egui::TextureOptions::LINEAR);
         }
     }
+
+    pub fn reset_counters_recursive(&mut self) {
+        self.counter = 0;
+        for child in &mut self.children {
+            child.reset_counters_recursive();
+        }
+    }
 }
 
 fn color_from_uuid(id: Uuid) -> egui::Color32 {
