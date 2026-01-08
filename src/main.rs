@@ -92,6 +92,7 @@ struct MaBlocksApp {
     last_unboxed_ids: Vec<Uuid>,
     last_boxed_id: Option<Uuid>,
     show_file_names: bool,
+    hovered_box_id: Option<Uuid>,
     /// Remembered chain groups - selecting one member auto-selects others
     remembered_chains: Vec<HashSet<Uuid>>,
 }
@@ -150,6 +151,7 @@ impl MaBlocksApp {
             last_boxed_id: None,
             show_file_names: false,
             remembered_chains: Vec::new(),
+            hovered_box_id: None,
         }
     }
 
@@ -394,6 +396,29 @@ impl MaBlocksApp {
     }
 
     fn drop_block_into_box(&mut self, block_idx: usize, box_idx: usize) {
+        let is_chained = self.blocks[block_idx].chained;
+        let box_id = self.blocks[box_idx].id;
+
+        if is_chained {
+            let chained_ids: Vec<Uuid> = self
+                .blocks
+                .iter()
+                .filter(|b| b.chained)
+                .map(|b| b.id)
+                .collect();
+            for id in chained_ids {
+                if let Some(b_idx) = self.blocks.iter().position(|b| b.id == id) {
+                    if let Some(t_idx) = self.blocks.iter().position(|b| b.id == box_id) {
+                        self.move_single_block_into_box(b_idx, t_idx);
+                    }
+                }
+            }
+        } else {
+            self.move_single_block_into_box(block_idx, box_idx);
+        }
+    }
+
+    fn move_single_block_into_box(&mut self, block_idx: usize, box_idx: usize) {
         let mut block = self.blocks.remove(block_idx);
         block.is_dragging = false;
         block.chained = false;
@@ -576,6 +601,7 @@ impl MaBlocksApp {
         _hovered: bool,
         show_controls: bool,
         hover_state: BlockControlHover,
+        is_drop_target: bool,
     ) {
         let painter = ui.painter_at(rect);
         let zoom = self.zoom;
@@ -593,7 +619,7 @@ impl MaBlocksApp {
         let rounding = egui::Rounding::same(6.0 * zoom);
 
         if block.is_group {
-            let fill_color = if block.chained {
+            let fill_color = if block.chained || is_drop_target {
                 Color32::from_rgb(100, 100, 150)
             } else {
                 Color32::from_rgb(60, 60, 60)
@@ -987,7 +1013,27 @@ impl eframe::App for MaBlocksApp {
                     );
                     let canvas_origin = canvas_rect.min;
 
+                    // Detect which box is being hovered by a dragged block
+                    self.hovered_box_id = None;
+                    if let Some(dragging_idx) = self.blocks.iter().position(|b| b.is_dragging) {
+                        if !self.blocks[dragging_idx].is_group {
+                            if let Some(m_pos) = ui.input(|i| i.pointer.interact_pos()) {
+                                let world_mouse = (m_pos - canvas_origin) / zoom;
+                                if let Some(target_idx) = self.blocks.iter().position(|other| {
+                                    other.id != self.blocks[dragging_idx].id
+                                        && other.is_group
+                                        && other.rect().contains(world_mouse.to_pos2())
+                                }) {
+                                    self.hovered_box_id = Some(self.blocks[target_idx].id);
+                                }
+                            }
+                        }
+                    }
+
                     let mut index = 0;
+                    let mut hovered_box_to_render = None;
+                    let mut dragging_blocks_to_render = Vec::new();
+
                     while index < self.blocks.len() {
                         let block_rect = Rect::from_min_size(
                             self.blocks[index].position * zoom,
@@ -1153,14 +1199,44 @@ impl eframe::App for MaBlocksApp {
                         let show_controls = is_hovering_block
                             || self.blocks[index].is_dragging
                             || self.blocks[index].chained;
-                        self.render_block(
-                            &mut canvas_ui,
-                            &self.blocks[index],
-                            block_rect,
-                            is_hovering_block,
-                            show_controls,
-                            hover_state,
-                        );
+
+                        let is_any_dragging = self.blocks.iter().any(|b| b.is_dragging);
+                        let is_hovered_box = Some(self.blocks[index].id) == self.hovered_box_id;
+                        let should_render_on_top = is_hovered_box
+                            || self.blocks[index].is_dragging
+                            || (is_any_dragging && self.blocks[index].chained);
+
+                        if !should_render_on_top {
+                            self.render_block(
+                                &mut canvas_ui,
+                                &self.blocks[index],
+                                block_rect,
+                                is_hovering_block,
+                                show_controls,
+                                hover_state,
+                                false,
+                            );
+                        }
+
+                        if is_hovered_box {
+                            hovered_box_to_render = Some((
+                                self.blocks[index].id,
+                                block_rect,
+                                is_hovering_block,
+                                show_controls,
+                                hover_state,
+                            ));
+                        } else if self.blocks[index].is_dragging
+                            || (is_any_dragging && self.blocks[index].chained)
+                        {
+                            dragging_blocks_to_render.push((
+                                self.blocks[index].id,
+                                block_rect,
+                                is_hovering_block,
+                                show_controls,
+                                hover_state,
+                            ));
+                        }
 
                         if primary_clicked && response.clicked() && !any_button_hovered {
                             if ui.input(|i| i.modifiers.ctrl) {
@@ -1175,6 +1251,18 @@ impl eframe::App for MaBlocksApp {
                             should_reflow = true;
                         } else {
                             index += 1;
+                        }
+                    }
+
+                    // Render dragging blocks and then hovered box on top
+                    for (id, rect, h, s, state) in dragging_blocks_to_render {
+                        if let Some(block) = self.blocks.iter().find(|b| b.id == id) {
+                            self.render_block(&mut canvas_ui, block, rect, h, s, state, false);
+                        }
+                    }
+                    if let Some((id, rect, h, s, state)) = hovered_box_to_render {
+                        if let Some(block) = self.blocks.iter().find(|b| b.id == id) {
+                            self.render_block(&mut canvas_ui, block, rect, h, s, state, true);
                         }
                     }
 
