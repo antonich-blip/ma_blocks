@@ -695,26 +695,28 @@ impl MaBlocksApp {
                 Color32::WHITE,
             );
 
-            painter.circle_filled(
-                counter_rect.center(),
-                btn_size / 2.0,
-                if hover_state.counter_hovered {
-                    Color32::from_rgb(0, 150, 0)
-                } else {
-                    Color32::from_rgb(0, 100, 0)
-                },
-            );
-            painter.text(
-                counter_rect.center(),
-                Align2::CENTER_CENTER,
-                "#",
-                FontId::monospace(12.0 * zoom),
-                Color32::WHITE,
-            );
+            if !block.is_group {
+                painter.circle_filled(
+                    counter_rect.center(),
+                    btn_size / 2.0,
+                    if hover_state.counter_hovered {
+                        Color32::from_rgb(0, 150, 0)
+                    } else {
+                        Color32::from_rgb(0, 100, 0)
+                    },
+                );
+                painter.text(
+                    counter_rect.center(),
+                    Align2::CENTER_CENTER,
+                    "#",
+                    FontId::monospace(12.0 * zoom),
+                    Color32::WHITE,
+                );
+            }
         }
 
         // Draw counter if > 0
-        if block.counter > 0 {
+        if !block.is_group && block.counter > 0 {
             let circle_radius = 15.0 * zoom;
             let circle_center = pos2(
                 rect.min.x + circle_radius + 5.0 * zoom,
@@ -1031,7 +1033,8 @@ impl eframe::App for MaBlocksApp {
                         let hover_state = BlockControlHover {
                             close_hovered: mouse_pos.is_some_and(|p| close_rect.contains(p)),
                             chain_hovered: mouse_pos.is_some_and(|p| chain_rect.contains(p)),
-                            counter_hovered: mouse_pos.is_some_and(|p| counter_rect.contains(p)),
+                            counter_hovered: !block.is_group
+                                && mouse_pos.is_some_and(|p| counter_rect.contains(p)),
                         };
 
                         let any_button_hovered = hover_state.close_hovered

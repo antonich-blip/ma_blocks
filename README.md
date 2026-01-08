@@ -81,8 +81,8 @@ WINIT_UNIX_BACKEND=x11 cargo run
     *   Unboxing restores all contained blocks to the main canvas.
     *   **Smart Toggle:** The 📦 toolbar button acts as a toggle. If no blocks are selected, clicking it will either re-box the most recently unboxed group or unbox the most recently created group, allowing for quick "previewing" of unboxed content.
 9. **Counter Feature:**
-    *   Each block has an optional counter (visible when > 0).
-    *   Interact via the '#' button: LMB click to increment, RMB click to decrement.
+    *   Each normal block has an optional counter (visible when > 0).
+    *   Interact via the '#' button: LMB click to increment, RMB click to decrement (normal blocks only).
 10. **Controls & Mappings:**
     *   **LMB + Drag:** Move blocks (triggers reflow on release or drop into box).
     *   **RMB + Drag:** Resize block(s) symmetrically.
@@ -93,7 +93,7 @@ WINIT_UNIX_BACKEND=x11 cargo run
 11. **Block UI (Hover/Interaction):**
     *   'x': Delete/Close block.
     *   'o': Toggle chaining.
-    *   '#': Increment/Decrement counter.
+    *   '#': Increment/Decrement counter (normal blocks only).
 
 ## ToDos
 - [x]  proper realignment with keeping order on  drag + drop of a group of blocks
