@@ -99,7 +99,8 @@ WINIT_UNIX_BACKEND=x11 cargo run
 - [x]  proper realignment with keeping order on  drag + drop of a group of blocks
 - [x]  make 'reset' button to reset counter bubbles inside boxes too
 - [x]  remember  group/'chain'. selecting one of the remembered member triggers auto selecting other members (this feature is session persistent)
-- [ ]  drop group of blocks into a box with proper visual effects
+- [x]  drop group of blocks into a box with proper visual effects
+- [x]  remove 'counter' button from 'box' blocks UI
 - [ ]  default images/sessions folder
 - [ ]  sound options
 - [ ]  text over blocks options
