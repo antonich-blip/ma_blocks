@@ -4,11 +4,11 @@ mod image_loader;
 use block::{ImageBlock, BLOCK_PADDING};
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, RichText, Sense, UiBuilder, Vec2};
 use egui::{pos2, vec2};
-use image_loader::load_image_frames;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -59,7 +59,7 @@ struct InteractionState {
 struct Session {
     blocks: Vec<BlockData>,
     #[serde(default)]
-    remembered_chains: Vec<Vec<String>>, // Vec of chain groups, each containing block UUIDs as strings
+    remembered_chains: Vec<Vec<String>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -93,8 +93,9 @@ struct MaBlocksApp {
     last_boxed_id: Option<Uuid>,
     show_file_names: bool,
     hovered_box_id: Option<Uuid>,
-    /// Remembered chain groups - selecting one member auto-selects others
     remembered_chains: Vec<HashSet<Uuid>>,
+    image_rx: Option<Receiver<Result<(PathBuf, image_loader::LoadedImage, bool), String>>>,
+    image_tx: Sender<Result<(PathBuf, image_loader::LoadedImage, bool), String>>,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -133,6 +134,7 @@ fn block_control_rects(rect: Rect, _block: &ImageBlock, zoom: f32) -> (Rect, Rec
 
 impl MaBlocksApp {
     fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+        let (tx, rx) = channel();
         Self {
             blocks: Vec::new(),
             next_block_id: 0,
@@ -146,25 +148,81 @@ impl MaBlocksApp {
             show_file_names: false,
             remembered_chains: Vec::new(),
             hovered_box_id: None,
+            image_rx: Some(rx),
+            image_tx: tx,
         }
     }
 
-    fn load_images(&mut self, ctx: &egui::Context) {
+    fn load_images(&mut self, _ctx: &egui::Context) {
         if let Some(paths) = rfd::FileDialog::new()
             .add_filter("Images", &["png", "jpg", "jpeg", "gif", "webp", "avif"])
             .pick_files()
         {
             for path in paths {
-                if let Err(err) = self.insert_block_from_path(ctx, path.clone()) {
-                    log::error!("{}", err);
-                }
+                self.trigger_image_load(path, true);
             }
-            self.reflow_blocks();
         }
     }
 
-    fn insert_block_from_path(&mut self, ctx: &egui::Context, path: PathBuf) -> Result<(), String> {
-        let loaded = load_image_frames(&path)?;
+    fn trigger_image_load(&self, path: PathBuf, first_frame_only: bool) {
+        let tx = self.image_tx.clone();
+        std::thread::spawn(move || {
+            let result = image_loader::load_image_frames_scaled(
+                &path,
+                Some(MAX_BLOCK_DIMENSION as u32),
+                first_frame_only,
+            )
+            .map(|loaded| (path, loaded, !first_frame_only));
+            let _ = tx.send(result);
+        });
+    }
+
+    fn poll_image_rx(&mut self, ctx: &egui::Context) {
+        if let Some(rx) = self.image_rx.take() {
+            let mut got_any = false;
+            while let Ok(result) = rx.try_recv() {
+                match result {
+                    Ok((path, loaded, is_full)) => {
+                        let mut loaded = loaded;
+                        let mut found = false;
+                        if is_full {
+                            let path_str = path.to_string_lossy().into_owned();
+                            for block in &mut self.blocks {
+                                if block.path == path_str && !block.is_full_sequence {
+                                    block.frames = std::mem::take(&mut loaded.frames);
+                                    block.is_full_sequence = true;
+                                    block.animation_enabled = true;
+                                    found = true;
+                                }
+                            }
+                        }
+
+                        if !found {
+                            if let Err(err) = self.insert_loaded_image(ctx, path, loaded, is_full) {
+                                log::error!("{}", err);
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        log::error!("Failed to load image: {}", err);
+                    }
+                }
+                got_any = true;
+            }
+            if got_any {
+                self.reflow_blocks();
+            }
+            self.image_rx = Some(rx);
+        }
+    }
+
+    fn insert_loaded_image(
+        &mut self,
+        ctx: &egui::Context,
+        path: PathBuf,
+        loaded: image_loader::LoadedImage,
+        is_full: bool,
+    ) -> Result<(), String> {
         if loaded.frames.is_empty() {
             return Err(format!(
                 "{} did not contain renderable frames",
@@ -185,11 +243,19 @@ impl MaBlocksApp {
             texture,
             loaded.frames,
             image_size,
+            loaded.has_animation,
+            is_full,
         );
         self.next_block_id += 1;
         block.position = pos2(CANVAS_PADDING, CANVAS_PADDING);
         self.blocks.push(block);
         Ok(())
+    }
+
+    fn insert_block_from_path(&mut self, ctx: &egui::Context, path: PathBuf) -> Result<(), String> {
+        let loaded =
+            image_loader::load_image_frames_scaled(&path, Some(MAX_BLOCK_DIMENSION as u32), true)?;
+        self.insert_loaded_image(ctx, path, loaded, false)
     }
 
     fn advance_animations(&mut self, dt: f32, ctx: &egui::Context) {
@@ -252,7 +318,6 @@ impl MaBlocksApp {
     }
 
     fn clear_chain_group(&mut self) {
-        // Collect IDs of currently chained blocks to remember
         let chained_ids: HashSet<Uuid> = self
             .blocks
             .iter()
@@ -260,16 +325,12 @@ impl MaBlocksApp {
             .map(|b| b.id)
             .collect();
 
-        // Only save if there are at least 2 chained blocks (a real group)
         if chained_ids.len() >= 2 {
-            // Remove any existing remembered chains that overlap with this one
             self.remembered_chains
                 .retain(|chain| chain.is_disjoint(&chained_ids));
-            // Add the new remembered chain
             self.remembered_chains.push(chained_ids);
         }
 
-        // Clear the chain
         for block in &mut self.blocks {
             block.chained = false;
         }
@@ -284,9 +345,7 @@ impl MaBlocksApp {
         let block_id = self.blocks[index].id;
         let was_chained = self.blocks[index].chained;
 
-        // If turning ON chain, check if this block belongs to a remembered chain
         if !was_chained {
-            // Find a remembered chain containing this block
             let remembered_chain = self
                 .remembered_chains
                 .iter()
@@ -294,18 +353,15 @@ impl MaBlocksApp {
                 .cloned();
 
             if let Some(chain_ids) = remembered_chain {
-                // Auto-chain all members of the remembered group
                 for block in &mut self.blocks {
                     if chain_ids.contains(&block.id) {
                         block.chained = true;
                     }
                 }
             } else {
-                // No remembered chain, just toggle this block
                 self.blocks[index].chained = true;
             }
         } else {
-            // Turning OFF - just toggle this block
             self.blocks[index].chained = false;
         }
 
@@ -325,7 +381,6 @@ impl MaBlocksApp {
             return Uuid::nil();
         }
 
-        // Sort indices in descending order to remove from blocks safely
         chained_indices.sort_by(|a, b| b.cmp(a));
 
         let mut children = Vec::new();
@@ -336,7 +391,7 @@ impl MaBlocksApp {
             min_pos.y = min_pos.y.min(block.position.y);
             children.push(block);
         }
-        children.reverse(); // Restore original order
+        children.reverse();
 
         let group_name = if children.len() > 1 {
             format!("Group of {}", children.len())
@@ -352,8 +407,6 @@ impl MaBlocksApp {
             "Empty Group".to_string()
         };
 
-        // Create a placeholder texture for the group (folder icon)
-        // For now, we use a simple color image
         let texture = ctx.load_texture(
             format!("group-texture-{}", self.next_block_id),
             egui::ColorImage::new([1, 1], Color32::from_rgb(200, 180, 100)),
@@ -375,7 +428,6 @@ impl MaBlocksApp {
     fn unbox_group(&mut self, index: usize) {
         let group = self.blocks.remove(index);
         if group.is_group {
-            // Find the index after all currently existing groups
             let insert_idx = self
                 .blocks
                 .iter()
@@ -430,7 +482,6 @@ impl MaBlocksApp {
 
         box_block.children.push(block);
 
-        // Update group name
         if box_block.children.len() > 1 {
             box_block.group_name = format!("Group of {}", box_block.children.len());
         } else if box_block.children.len() == 1 {
@@ -447,7 +498,6 @@ impl MaBlocksApp {
     fn toggle_compact_group(&mut self, ctx: &egui::Context) {
         let chained_count = self.blocks.iter().filter(|b| b.chained).count();
 
-        // If nothing is chained, try to toggle the last state
         if chained_count == 0 {
             if !self.last_unboxed_ids.is_empty() {
                 let mut found_any = false;
@@ -477,7 +527,6 @@ impl MaBlocksApp {
 
         if chained.len() == 1 && chained[0].is_group {
             let idx = self.blocks.iter().position(|b| b.chained).unwrap();
-            // Store children IDs before unboxing
             self.last_unboxed_ids = self.blocks[idx].children.iter().map(|c| c.id).collect();
             self.unbox_group(idx);
             self.last_boxed_id = None;
@@ -489,7 +538,6 @@ impl MaBlocksApp {
 
     fn reorder_and_reflow(&mut self, leader_id: Option<Uuid>) {
         if let Some(leader_id) = leader_id {
-            // Identify moved group
             let is_leader_chained = self
                 .blocks
                 .iter()
@@ -500,7 +548,6 @@ impl MaBlocksApp {
             let mut moved_group = Vec::new();
             let mut remaining = Vec::new();
 
-            // We must preserve the relative order in self.blocks
             let leader_idx_in_group = self
                 .blocks
                 .iter()
@@ -532,14 +579,12 @@ impl MaBlocksApp {
                 return;
             }
 
-            // Find where the leader ended up
             let leader_pos = moved_group
                 .iter()
                 .find(|b| b.id == leader_id)
                 .unwrap()
                 .position;
 
-            // Sort remaining by current position to find insertion point correctly
             remaining.sort_by(|a, b| {
                 let a_y_q = (a.position.y / 100.0) as i32;
                 let b_y_q = (b.position.y / 100.0) as i32;
@@ -564,13 +609,11 @@ impl MaBlocksApp {
                 }
             }
 
-            // Re-assemble
             self.blocks = remaining;
             for (i, block) in moved_group.into_iter().enumerate() {
                 self.blocks.insert(insert_idx + i, block);
             }
         } else {
-            // Old sorting logic as fallback
             self.blocks.sort_by(|a, b| {
                 let a_y_q = (a.position.y / 100.0) as i32;
                 let b_y_q = (b.position.y / 100.0) as i32;
@@ -600,7 +643,6 @@ impl MaBlocksApp {
         let painter = ui.painter_at(rect);
         let zoom = self.zoom;
 
-        // Draw only the image, no background or border for minimalistic look
         let image_rect = Rect::from_min_size(
             pos2(
                 rect.min.x + BLOCK_PADDING * zoom,
@@ -609,7 +651,6 @@ impl MaBlocksApp {
             block.image_size * zoom,
         );
 
-        // Slightly rounded corners for the image
         let rounding = egui::Rounding::same(6.0 * zoom);
 
         if block.is_group {
@@ -620,7 +661,6 @@ impl MaBlocksApp {
             };
             painter.rect_filled(image_rect, rounding, fill_color);
 
-            // Folder-like icon (simplified)
             let folder_rect = Rect::from_center_size(image_rect.center(), image_rect.size() * 0.9);
             painter.rect_filled(folder_rect, egui::Rounding::same(2.0 * zoom), block.color);
             painter.rect_filled(
@@ -632,7 +672,6 @@ impl MaBlocksApp {
                 block.color,
             );
 
-            // Representative image tag - centered
             if let Some(rep_texture) = &block.representative_texture {
                 let tag_size = image_rect.size() * 0.8;
                 let tag_rect = Rect::from_center_size(image_rect.center(), tag_size);
@@ -655,9 +694,7 @@ impl MaBlocksApp {
 
         if show_controls {
             let (close_rect, chain_rect, counter_rect) = block_control_rects(rect, block, zoom);
-            // block_control_rects already uses the passed rect which is scaled
-
-            let btn_size = 16.0 * zoom; // Use the same size for drawing
+            let btn_size = 16.0 * zoom;
             let chain_enabled = self.can_chain();
 
             painter.circle_filled(
@@ -715,7 +752,6 @@ impl MaBlocksApp {
             }
         }
 
-        // Draw counter if > 0
         if !block.is_group && block.counter > 0 {
             let circle_radius = 15.0 * zoom;
             let circle_center = pos2(
@@ -751,7 +787,6 @@ impl MaBlocksApp {
                 .painter()
                 .layout_no_wrap(name.to_string(), font_id, Color32::WHITE);
 
-            // Position at top-left of the image with a small margin
             let text_pos = image_rect.left_top() + vec2(4.0 * zoom, 4.0 * zoom);
             let text_rect = Rect::from_min_size(text_pos, galley.size());
 
@@ -811,7 +846,6 @@ impl MaBlocksApp {
                 self.blocks[idx].position = new_rect.min;
                 self.blocks[idx].set_preferred_size(new_size);
 
-                // Handle chained blocks group resizing
                 if self.blocks[idx].chained {
                     let chained_count = self.blocks.iter().filter(|b| b.chained).count();
                     if chained_count > 1 {
@@ -840,6 +874,7 @@ impl MaBlocksApp {
 
 impl eframe::App for MaBlocksApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.poll_image_rx(ctx);
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::N)) {
             self.show_file_names = !self.show_file_names;
         }
@@ -922,7 +957,6 @@ impl eframe::App for MaBlocksApp {
         let mut dropped_leader_id = None;
         let mut should_reflow = false;
         egui::CentralPanel::default().show(ctx, |ui| {
-            // Zoom handling: Ctrl + Scroll
             let zoom_delta = ui.input(|i| i.zoom_delta());
             if zoom_delta != 1.0 {
                 self.zoom = (self.zoom * zoom_delta).clamp(0.1, 10.0);
@@ -963,7 +997,6 @@ impl eframe::App for MaBlocksApp {
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    // MMB Panning: Pan the canvas even over blocks
                     if ui.input(|i| i.pointer.button_down(egui::PointerButton::Middle)) {
                         let delta = ui.input(|i| i.pointer.delta());
                         ui.scroll_with_delta(delta);
@@ -991,7 +1024,6 @@ impl eframe::App for MaBlocksApp {
                     );
                     let canvas_origin = canvas_rect.min;
 
-                    // Detect which box is being hovered by a dragged block
                     self.hovered_box_id = None;
                     if let Some(dragging_idx) = self.blocks.iter().position(|b| b.is_dragging) {
                         if !self.blocks[dragging_idx].is_group {
@@ -1024,9 +1056,6 @@ impl eframe::App for MaBlocksApp {
                             block_control_rects(block_rect, block, zoom);
 
                         let block_id = canvas_ui.id().with(block.id);
-
-                        // We use a custom hit test to see if we should show controls
-                        // and to handle button clicks before the block gets them.
                         let mouse_pos = ui.input(|i| i.pointer.hover_pos());
                         let is_hovering_block = mouse_pos.is_some_and(|p| block_rect.contains(p));
 
@@ -1041,7 +1070,6 @@ impl eframe::App for MaBlocksApp {
                             || hover_state.chain_hovered
                             || hover_state.counter_hovered;
 
-                        // Sense clicks manually to avoid egui widget capture issues
                         let primary_clicked =
                             ui.input(|i| i.pointer.button_clicked(egui::PointerButton::Primary));
                         let secondary_clicked =
@@ -1054,7 +1082,6 @@ impl eframe::App for MaBlocksApp {
                                 self.skip_chain_cancel = true;
                             } else if hover_state.chain_hovered {
                                 self.toggle_chain_for_block(index);
-                                // toggle_chain_for_block already sets skip_chain_cancel
                             } else if hover_state.counter_hovered {
                                 self.blocks[index].counter += 1;
                                 self.skip_chain_cancel = true;
@@ -1066,7 +1093,6 @@ impl eframe::App for MaBlocksApp {
                             self.skip_chain_cancel = true;
                         }
 
-                        // Resizing start: RMB + Drag
                         if secondary_pressed && is_hovering_block && !any_button_hovered {
                             if let Some(m_pos) = mouse_pos {
                                 let world_mouse = (m_pos - canvas_origin) / zoom;
@@ -1087,9 +1113,7 @@ impl eframe::App for MaBlocksApp {
                             }
                         }
 
-                        // Now handle the block itself
                         let block_sense = Sense::click_and_drag();
-
                         let response = canvas_ui.interact(block_rect, block_id, block_sense);
 
                         if response.drag_started_by(egui::PointerButton::Primary)
@@ -1107,7 +1131,6 @@ impl eframe::App for MaBlocksApp {
                             && response.dragged_by(egui::PointerButton::Primary)
                         {
                             if let Some(pointer) = response.interact_pointer_pos() {
-                                // Autoscroll logic
                                 let viewport = ui.clip_rect();
                                 let mut scroll_delta = 0.0;
                                 if pointer.y < viewport.min.y {
@@ -1215,8 +1238,13 @@ impl eframe::App for MaBlocksApp {
                         if primary_clicked && response.clicked() && !any_button_hovered {
                             if ui.input(|i| i.modifiers.ctrl) {
                                 self.toggle_chain_for_block(index);
-                            } else if self.blocks[index].frames.len() > 1 {
-                                self.blocks[index].toggle_animation();
+                            } else if self.blocks[index].has_animation {
+                                if !self.blocks[index].is_full_sequence {
+                                    let path = PathBuf::from(&self.blocks[index].path);
+                                    self.trigger_image_load(path, false);
+                                } else {
+                                    self.blocks[index].toggle_animation();
+                                }
                             }
                         }
 
@@ -1228,7 +1256,6 @@ impl eframe::App for MaBlocksApp {
                         }
                     }
 
-                    // Render dragging blocks and then hovered box on top
                     for (id, rect, h, s, state) in dragging_blocks_to_render {
                         if let Some(block) = self.blocks.iter().find(|b| b.id == id) {
                             self.render_block(&mut canvas_ui, block, rect, h, s, state, false);
@@ -1240,7 +1267,6 @@ impl eframe::App for MaBlocksApp {
                         }
                     }
 
-                    // Chaining cancellation
                     if !std::mem::take(&mut self.skip_chain_cancel) {
                         if ui.input(|i| i.pointer.button_clicked(egui::PointerButton::Primary)) {
                             if let Some(click_pos) = ui.input(|i| i.pointer.interact_pos()) {
@@ -1379,7 +1405,6 @@ impl MaBlocksApp {
                             self.blocks.push(block);
                         }
                     }
-                    // Load remembered chains
                     self.remembered_chains = session
                         .remembered_chains
                         .into_iter()

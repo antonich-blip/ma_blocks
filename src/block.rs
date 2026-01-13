@@ -26,6 +26,8 @@ pub struct ImageBlock {
     pub group_name: String,
     pub children: Vec<ImageBlock>,
     pub representative_texture: Option<egui::TextureHandle>,
+    pub has_animation: bool,
+    pub is_full_sequence: bool,
 }
 
 impl ImageBlock {
@@ -34,6 +36,8 @@ impl ImageBlock {
         texture: egui::TextureHandle,
         frames: Vec<AnimationFrame>,
         image_size: Vec2,
+        has_animation: bool,
+        is_full_sequence: bool,
     ) -> Self {
         let aspect_ratio = if image_size.y > 0.0 {
             image_size.x / image_size.y
@@ -63,6 +67,8 @@ impl ImageBlock {
             group_name: String::new(),
             children: Vec::new(),
             representative_texture: None,
+            has_animation,
+            is_full_sequence,
         }
     }
 
@@ -96,6 +102,8 @@ impl ImageBlock {
             group_name: name,
             children,
             representative_texture,
+            has_animation: false,
+            is_full_sequence: true,
         }
     }
 

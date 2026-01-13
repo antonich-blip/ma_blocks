@@ -7,6 +7,8 @@ use std::io::Cursor;
 use std::path::Path;
 use std::time::Duration;
 
+pub const MAX_ANIMATION_FRAMES: usize = 128;
+
 #[derive(Clone)]
 pub struct AnimationFrame {
     pub image: ColorImage,
@@ -23,10 +25,11 @@ impl AnimationFrame {
 pub struct LoadedImage {
     pub frames: Vec<AnimationFrame>,
     pub original_size: egui::Vec2,
+    pub has_animation: bool,
 }
 
 impl LoadedImage {
-    pub fn from_frames(frames: Vec<AnimationFrame>) -> Self {
+    pub fn from_frames(frames: Vec<AnimationFrame>, has_animation: bool) -> Self {
         let original_size = frames
             .first()
             .map(|frame| frame.size_vec2())
@@ -34,11 +37,16 @@ impl LoadedImage {
         Self {
             frames,
             original_size,
+            has_animation,
         }
     }
 }
 
-pub fn load_image_frames(path: &Path) -> Result<LoadedImage, String> {
+pub fn load_image_frames_scaled(
+    path: &Path,
+    max_dimension: Option<u32>,
+    first_frame_only: bool,
+) -> Result<LoadedImage, String> {
     let bytes =
         fs::read(path).map_err(|err| format!("Failed to read {}: {err}", path.display()))?;
 
@@ -46,56 +54,94 @@ pub fn load_image_frames(path: &Path) -> Result<LoadedImage, String> {
         .or_else(|_| ImageFormat::from_path(path))
         .map_err(|err| format!("Failed to determine format for {}: {err}", path.display()))?;
 
-    match format {
-        ImageFormat::Gif => decode_gif(&bytes),
-        ImageFormat::WebP => decode_webp(&bytes),
-        ImageFormat::Avif => decode_avif(&bytes).or_else(|err| {
+    let mut loaded = match format {
+        ImageFormat::Gif => decode_gif(&bytes, first_frame_only),
+        ImageFormat::WebP => decode_webp(&bytes, first_frame_only),
+        ImageFormat::Avif => decode_avif(&bytes, first_frame_only).or_else(|err| {
             log::warn!("Falling back to static AVIF decode: {}", err);
             decode_static(&bytes, ImageFormat::Avif)
         }),
         _ => decode_static(&bytes, format),
+    }?;
+
+    if let Some(max_dim) = max_dimension {
+        for frame in &mut loaded.frames {
+            let [w, h] = frame.image.size;
+            if w > max_dim as usize || h > max_dim as usize {
+                let scale = (max_dim as f32) / (w.max(h) as f32);
+                let new_w = (w as f32 * scale) as u32;
+                let new_h = (h as f32 * scale) as u32;
+
+                let rgba = frame.image.as_raw().to_vec();
+                if let Some(img) =
+                    image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(w as u32, h as u32, rgba)
+                {
+                    let dynamic = DynamicImage::ImageRgba8(img);
+                    let resized = dynamic.thumbnail(new_w, new_h);
+                    frame.image = color_image_from_dynamic(resized);
+                }
+            }
+        }
     }
+
+    Ok(loaded)
 }
 
 fn decode_static(bytes: &[u8], format: ImageFormat) -> Result<LoadedImage, String> {
     let image = image::load_from_memory_with_format(bytes, format)
         .map_err(|err| format!("Failed to decode image: {err}"))?;
     let color_image = color_image_from_dynamic(image);
-    Ok(LoadedImage::from_frames(vec![AnimationFrame {
-        image: color_image,
-        duration: Duration::from_millis(1000),
-    }]))
+    Ok(LoadedImage::from_frames(
+        vec![AnimationFrame {
+            image: color_image,
+            duration: Duration::from_millis(1000),
+        }],
+        false,
+    ))
 }
 
-fn decode_gif(bytes: &[u8]) -> Result<LoadedImage, String> {
+fn decode_gif(bytes: &[u8], first_frame_only: bool) -> Result<LoadedImage, String> {
     let cursor = Cursor::new(bytes);
     let decoder = GifDecoder::new(cursor).map_err(|err| format!("GIF decode error: {err}"))?;
-    let frames = decoder
+    let limit = if first_frame_only {
+        1
+    } else {
+        MAX_ANIMATION_FRAMES
+    };
+    let frames: Vec<Frame> = decoder
         .into_frames()
-        .collect_frames()
+        .take(limit)
+        .collect::<Result<Vec<_>, _>>()
         .map_err(|err| format!("GIF frame error: {err}"))?;
-    frames_to_loaded_image(frames)
+    frames_to_loaded_image(frames, true)
 }
 
-fn decode_webp(bytes: &[u8]) -> Result<LoadedImage, String> {
+fn decode_webp(bytes: &[u8], first_frame_only: bool) -> Result<LoadedImage, String> {
     let decoder =
         WebPDecoder::new(Cursor::new(bytes)).map_err(|err| format!("WebP decode error: {err}"))?;
-    if decoder.has_animation() {
-        let frames = decoder
+    let has_animation = decoder.has_animation();
+    if has_animation {
+        let limit = if first_frame_only {
+            1
+        } else {
+            MAX_ANIMATION_FRAMES
+        };
+        let frames: Vec<Frame> = decoder
             .into_frames()
-            .collect_frames()
+            .take(limit)
+            .collect::<Result<Vec<_>, _>>()
             .map_err(|err| format!("WebP frame error: {err}"))?;
-        frames_to_loaded_image(frames)
+        frames_to_loaded_image(frames, true)
     } else {
         decode_static(bytes, ImageFormat::WebP)
     }
 }
 
-fn decode_avif(bytes: &[u8]) -> Result<LoadedImage, String> {
-    avif_support::decode(bytes)
+fn decode_avif(bytes: &[u8], first_frame_only: bool) -> Result<LoadedImage, String> {
+    avif_support::decode(bytes, first_frame_only)
 }
 
-fn frames_to_loaded_image(frames: Vec<Frame>) -> Result<LoadedImage, String> {
+fn frames_to_loaded_image(frames: Vec<Frame>, has_animation: bool) -> Result<LoadedImage, String> {
     if frames.is_empty() {
         return Err("Image did not contain frames".to_string());
     }
@@ -113,7 +159,7 @@ fn frames_to_loaded_image(frames: Vec<Frame>) -> Result<LoadedImage, String> {
         });
     }
 
-    Ok(LoadedImage::from_frames(converted))
+    Ok(LoadedImage::from_frames(converted, has_animation))
 }
 
 fn color_image_from_dynamic(image: DynamicImage) -> egui::ColorImage {
@@ -138,11 +184,11 @@ fn sanitize_duration(duration: Duration) -> Duration {
 }
 
 mod avif_support {
-    use super::{sanitize_duration, AnimationFrame, LoadedImage};
+    use super::{sanitize_duration, AnimationFrame, LoadedImage, MAX_ANIMATION_FRAMES};
     use egui::ColorImage;
     use std::time::Duration;
 
-    pub fn decode(bytes: &[u8]) -> Result<LoadedImage, String> {
+    pub fn decode(bytes: &[u8], first_frame_only: bool) -> Result<LoadedImage, String> {
         let decoder =
             DecoderGuard::new().ok_or_else(|| "Failed to create AVIF decoder".to_string())?;
 
@@ -172,7 +218,13 @@ mod avif_support {
         let mut frames = Vec::new();
         let mut frame_index: u32 = 0;
 
-        loop {
+        let limit = if first_frame_only {
+            1
+        } else {
+            MAX_ANIMATION_FRAMES
+        };
+
+        while (frame_index as usize) < limit {
             let result = unsafe { libavif_sys::avifDecoderNextImage(decoder.decoder) };
             if result == libavif_sys::AVIF_RESULT_OK {
                 let image = unsafe { (*decoder.decoder).image };
@@ -244,7 +296,7 @@ mod avif_support {
             })
             .collect();
 
-        Ok(LoadedImage::from_frames(converted))
+        Ok(LoadedImage::from_frames(converted, image_count > 1))
     }
 
     struct AvifFrame {

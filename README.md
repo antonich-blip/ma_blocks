@@ -43,6 +43,16 @@ WINIT_UNIX_BACKEND=wayland cargo run
 WINIT_UNIX_BACKEND=x11 cargo run
 ```
 
+### Performance & Resource Optimization
+
+MaBlocks2 is designed to handle a large number of images efficiently:
+
+- **Asynchronous Loading:** Images are decoded in background threads, keeping the UI responsive even when loading many files at once.
+- **On-Demand Animation:** For animated images (GIF, WebP, AVIF), only the first frame is loaded initially. The full animation sequence is loaded only when you enable animation for that block.
+- **Memory Capping:** 
+    - **Downsampling:** Large images are automatically downsampled during loading to fit within reasonable dimensions, significantly reducing VRAM and RAM usage.
+    - **Frame Limits:** Animation sequences are limited to a maximum of 128 frames to prevent excessive memory consumption from long or high-fps animations.
+
 ## User Requirements
 
 1. **Platform:** Whiteboard-type GUI desktop app for Linux (Wayland/X11) and macOS, written in Rust using `eframe`/`egui`.
@@ -101,6 +111,7 @@ WINIT_UNIX_BACKEND=x11 cargo run
 - [x]  remember  group/'chain'. selecting one of the remembered member triggers auto selecting other members (this feature is session persistent)
 - [x]  drop group of blocks into a box with proper visual effects
 - [x]  remove 'counter' button from 'box' blocks UI
+- [ ]  edge case with moving boxes
 - [ ]  default images/sessions folder
 - [ ]  sound options
 - [ ]  text over blocks options
