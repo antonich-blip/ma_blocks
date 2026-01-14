@@ -1,9 +1,11 @@
 mod block;
 mod image_loader;
+mod paths;
 
 use block::{ImageBlock, BLOCK_PADDING};
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, RichText, Sense, UiBuilder, Vec2};
 use egui::{pos2, vec2};
+use paths::AppPaths;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -99,6 +101,7 @@ struct MaBlocksApp {
     image_tx: Sender<Result<(PathBuf, image_loader::LoadedImage, bool), String>>,
     /// Tracks the order in which animations were last accessed (played)
     animation_access_order: Vec<Uuid>,
+    paths: Option<AppPaths>,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -138,6 +141,12 @@ fn block_control_rects(rect: Rect, _block: &ImageBlock, zoom: f32) -> (Rect, Rec
 impl MaBlocksApp {
     fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let (tx, rx) = channel();
+        let paths = AppPaths::from_project_dirs();
+        if let Some(ref p) = paths {
+            if let Err(err) = p.ensure_dirs_exist() {
+                log::error!("Failed to create default directories: {}", err);
+            }
+        }
         Self {
             blocks: Vec::new(),
             next_block_id: 0,
@@ -154,14 +163,19 @@ impl MaBlocksApp {
             image_rx: Some(rx),
             image_tx: tx,
             animation_access_order: Vec::new(),
+            paths,
         }
     }
 
     fn load_images(&mut self, _ctx: &egui::Context) {
-        if let Some(paths) = rfd::FileDialog::new()
-            .add_filter("Images", &["png", "jpg", "jpeg", "gif", "webp", "avif"])
-            .pick_files()
-        {
+        let mut dialog = rfd::FileDialog::new()
+            .add_filter("Images", &["png", "jpg", "jpeg", "gif", "webp", "avif"]);
+
+        if let Some(ref p) = self.paths {
+            dialog = dialog.set_directory(&p.images);
+        }
+
+        if let Some(paths) = dialog.pick_files() {
             for path in paths {
                 self.trigger_image_load(path, true);
             }
@@ -1343,11 +1357,15 @@ impl eframe::App for MaBlocksApp {
 
 impl MaBlocksApp {
     fn save_session(&mut self) {
-        if let Some(path) = rfd::FileDialog::new()
+        let mut dialog = rfd::FileDialog::new()
             .add_filter("Session", &["json"])
-            .set_file_name("ma_blocks_session.json")
-            .save_file()
-        {
+            .set_file_name("ma_blocks_session.json");
+
+        if let Some(ref p) = self.paths {
+            dialog = dialog.set_directory(&p.sessions);
+        }
+
+        if let Some(path) = dialog.save_file() {
             let session = Session {
                 blocks: self.blocks.iter().map(|b| self.block_to_data(b)).collect(),
                 remembered_chains: self
@@ -1440,10 +1458,13 @@ impl MaBlocksApp {
     }
 
     fn load_session(&mut self, ctx: &egui::Context) {
-        if let Some(path) = rfd::FileDialog::new()
-            .add_filter("Session", &["json"])
-            .pick_file()
-        {
+        let mut dialog = rfd::FileDialog::new().add_filter("Session", &["json"]);
+
+        if let Some(ref p) = self.paths {
+            dialog = dialog.set_directory(&p.sessions);
+        }
+
+        if let Some(path) = dialog.pick_file() {
             if let Ok(file) = std::fs::File::open(&path) {
                 if let Ok(session) =
                     serde_json::from_reader::<_, Session>(std::io::BufReader::new(file))

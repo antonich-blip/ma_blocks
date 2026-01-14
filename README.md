@@ -113,7 +113,7 @@ MaBlocks2 is designed to handle a large number of images efficiently:
 - [x]  drop group of blocks into a box with proper visual effects
 - [x]  remove 'counter' button from 'box' blocks UI
 - [ ]  edge case with moving boxes
-- [ ]  default images/sessions folder
+- [x]  default images/sessions folder
 - [ ]  sound options
 - [ ]  text over blocks options
 - [ ]  Windows support
