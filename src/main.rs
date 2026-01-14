@@ -231,7 +231,7 @@ impl MaBlocksApp {
                 got_any = true;
             }
             if got_any {
-                self.reflow_blocks();
+                self.reorder_and_reflow(None);
             }
             self.image_rx = Some(rx);
         }
@@ -349,8 +349,18 @@ impl MaBlocksApp {
 
         let mut cursor = vec2(CANVAS_PADDING, CANVAS_PADDING);
         let mut row_height = 0.0;
+        let mut prev_is_group = None;
 
         for block in &mut self.blocks {
+            if let Some(prev) = prev_is_group {
+                if prev != block.is_group && cursor.x > CANVAS_PADDING {
+                    cursor.x = CANVAS_PADDING;
+                    cursor.y += row_height + ALIGN_SPACING;
+                    row_height = 0.0;
+                }
+            }
+            prev_is_group = Some(block.is_group);
+
             let size = block.outer_size();
             if cursor.x + size.x > row_limit {
                 cursor.x = CANVAS_PADDING;
@@ -636,33 +646,57 @@ impl MaBlocksApp {
                 return;
             }
 
+            remaining.sort_by(|a, b| match (a.is_group, b.is_group) {
+                (true, false) => Ordering::Less,
+                (false, true) => Ordering::Greater,
+                _ => {
+                    let a_y_q = (a.position.y / 100.0) as i32;
+                    let b_y_q = (b.position.y / 100.0) as i32;
+                    match a_y_q.cmp(&b_y_q) {
+                        Ordering::Equal => a
+                            .position
+                            .x
+                            .partial_cmp(&b.position.x)
+                            .unwrap_or(Ordering::Equal),
+                        ord => ord,
+                    }
+                }
+            });
+
             let leader_pos = moved_group
                 .iter()
                 .find(|b| b.id == leader_id)
                 .unwrap()
                 .position;
+            let is_leader_group = moved_group[0].is_group;
 
-            remaining.sort_by(|a, b| {
-                let a_y_q = (a.position.y / 100.0) as i32;
-                let b_y_q = (b.position.y / 100.0) as i32;
-                match a_y_q.cmp(&b_y_q) {
-                    Ordering::Equal => a
-                        .position
-                        .x
-                        .partial_cmp(&b.position.x)
-                        .unwrap_or(Ordering::Equal),
-                    ord => ord,
+            let group_boundary = remaining
+                .iter()
+                .position(|b| !b.is_group)
+                .unwrap_or(remaining.len());
+
+            let mut insert_idx;
+            if is_leader_group {
+                insert_idx = group_boundary;
+                for (i, b) in remaining[..group_boundary].iter().enumerate() {
+                    let b_y_q = (b.position.y / 100.0) as i32;
+                    let leader_y_q = (leader_pos.y / 100.0) as i32;
+
+                    if leader_y_q < b_y_q || (leader_y_q == b_y_q && leader_pos.x < b.position.x) {
+                        insert_idx = i;
+                        break;
+                    }
                 }
-            });
+            } else {
+                insert_idx = remaining.len();
+                for (i, b) in remaining[group_boundary..].iter().enumerate() {
+                    let b_y_q = (b.position.y / 100.0) as i32;
+                    let leader_y_q = (leader_pos.y / 100.0) as i32;
 
-            let mut insert_idx = remaining.len();
-            for (i, b) in remaining.iter().enumerate() {
-                let b_y_q = (b.position.y / 100.0) as i32;
-                let leader_y_q = (leader_pos.y / 100.0) as i32;
-
-                if leader_y_q < b_y_q || (leader_y_q == b_y_q && leader_pos.x < b.position.x) {
-                    insert_idx = i;
-                    break;
+                    if leader_y_q < b_y_q || (leader_y_q == b_y_q && leader_pos.x < b.position.x) {
+                        insert_idx = group_boundary + i;
+                        break;
+                    }
                 }
             }
 
@@ -671,16 +705,20 @@ impl MaBlocksApp {
                 self.blocks.insert(insert_idx + i, block);
             }
         } else {
-            self.blocks.sort_by(|a, b| {
-                let a_y_q = (a.position.y / 100.0) as i32;
-                let b_y_q = (b.position.y / 100.0) as i32;
-                match a_y_q.cmp(&b_y_q) {
-                    Ordering::Equal => a
-                        .position
-                        .x
-                        .partial_cmp(&b.position.x)
-                        .unwrap_or(Ordering::Equal),
-                    ord => ord,
+            self.blocks.sort_by(|a, b| match (a.is_group, b.is_group) {
+                (true, false) => Ordering::Less,
+                (false, true) => Ordering::Greater,
+                _ => {
+                    let a_y_q = (a.position.y / 100.0) as i32;
+                    let b_y_q = (b.position.y / 100.0) as i32;
+                    match a_y_q.cmp(&b_y_q) {
+                        Ordering::Equal => a
+                            .position
+                            .x
+                            .partial_cmp(&b.position.x)
+                            .unwrap_or(Ordering::Equal),
+                        ord => ord,
+                    }
                 }
             });
         }
@@ -1487,7 +1525,7 @@ impl MaBlocksApp {
                         .filter(|chain: &HashSet<Uuid>| chain.len() >= 2)
                         .collect();
                     self.session_file = Some(path);
-                    self.reflow_blocks();
+                    self.reorder_and_reflow(None);
                 }
             }
         }

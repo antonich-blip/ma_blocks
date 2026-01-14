@@ -70,6 +70,7 @@ MaBlocks2 is designed to handle a large number of images efficiently:
 4. **Block Support:** 
     *   Currently supports Image blocks with full transparency and animation support (GIF, animated WebP, animated AVIF).
     *   **Box Blocks:** Specialized blocks that contain other blocks.
+    *   box blocks (groups) occupy the top lines of the canvas and do not share those lines with other block types.
     *   Images spawn with original aspect ratio and maintain it during all operations.
 5. **Alignment & Layout:** 
     *   Automatic row-based reflow logic with wrapping (similar to text).
@@ -112,12 +113,11 @@ MaBlocks2 is designed to handle a large number of images efficiently:
 - [x]  remember  group/'chain'. selecting one of the remembered member triggers auto selecting other members (this feature is session persistent)
 - [x]  drop group of blocks into a box with proper visual effects
 - [x]  remove 'counter' button from 'box' blocks UI
-- [ ]  edge case with moving boxes
+- [x]  edge case with moving boxes
 - [x]  default images/sessions folder
 - [ ]  sound options
 - [ ]  text over blocks options
 - [ ]  Windows support
 - [ ]  Mobile support
-- [ ]  Investigate edge case: what happens with overlonding if 50+ files animations have been loaded/played
 
 
