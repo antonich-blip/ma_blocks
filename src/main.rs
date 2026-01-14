@@ -18,6 +18,7 @@ const ALIGN_SPACING: f32 = 24.0;
 const MAX_BLOCK_DIMENSION: f32 = 420.0;
 const MIN_BLOCK_SIZE: f32 = 50.0;
 const MIN_CANVAS_INNER_WIDTH: f32 = MIN_BLOCK_SIZE + BLOCK_PADDING * 2.0;
+const MAX_CACHED_ANIMATIONS: usize = 20;
 
 fn main() -> eframe::Result<()> {
     env_logger::init();
@@ -96,6 +97,8 @@ struct MaBlocksApp {
     remembered_chains: Vec<HashSet<Uuid>>,
     image_rx: Option<Receiver<Result<(PathBuf, image_loader::LoadedImage, bool), String>>>,
     image_tx: Sender<Result<(PathBuf, image_loader::LoadedImage, bool), String>>,
+    /// Tracks the order in which animations were last accessed (played)
+    animation_access_order: Vec<Uuid>,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -150,6 +153,7 @@ impl MaBlocksApp {
             hovered_box_id: None,
             image_rx: Some(rx),
             image_tx: tx,
+            animation_access_order: Vec::new(),
         }
     }
 
@@ -184,7 +188,7 @@ impl MaBlocksApp {
                 match result {
                     Ok((path, loaded, is_full)) => {
                         let mut loaded = loaded;
-                        let mut found = false;
+                        let mut update_id = None;
                         if is_full {
                             let path_str = path.to_string_lossy().into_owned();
                             for block in &mut self.blocks {
@@ -192,12 +196,15 @@ impl MaBlocksApp {
                                     block.frames = std::mem::take(&mut loaded.frames);
                                     block.is_full_sequence = true;
                                     block.animation_enabled = true;
-                                    found = true;
+                                    update_id = Some(block.id);
+                                    break;
                                 }
                             }
                         }
 
-                        if !found {
+                        if let Some(id) = update_id {
+                            self.mark_animation_used(id);
+                        } else {
                             if let Err(err) = self.insert_loaded_image(ctx, path, loaded, is_full) {
                                 log::error!("{}", err);
                             }
@@ -213,6 +220,36 @@ impl MaBlocksApp {
                 self.reflow_blocks();
             }
             self.image_rx = Some(rx);
+        }
+    }
+
+    fn mark_animation_used(&mut self, id: Uuid) {
+        // Remove if exists and push to back (most recent)
+        self.animation_access_order.retain(|&x| x != id);
+        self.animation_access_order.push(id);
+
+        // If we exceed cache size, purge the oldest (front)
+        if self.animation_access_order.len() > MAX_CACHED_ANIMATIONS {
+            let to_purge_id = self.animation_access_order.remove(0);
+            self.purge_animation_frames(to_purge_id);
+        }
+    }
+
+    fn purge_animation_frames(&mut self, id: Uuid) {
+        if let Some(block) = self.blocks.iter_mut().find(|b| b.id == id) {
+            if block.is_full_sequence && block.frames.len() > 1 {
+                // Keep only the first frame
+                block.frames.truncate(1);
+                block.is_full_sequence = false;
+                block.animation_enabled = false;
+                block.current_frame = 0;
+                // Reset texture to first frame
+                if let Some(first) = block.frames.first() {
+                    block
+                        .texture
+                        .set(first.image.clone(), egui::TextureOptions::LINEAR);
+                }
+            }
         }
     }
 
@@ -248,7 +285,13 @@ impl MaBlocksApp {
         );
         self.next_block_id += 1;
         block.position = pos2(CANVAS_PADDING, CANVAS_PADDING);
+        let id = block.id;
         self.blocks.push(block);
+
+        if is_full {
+            self.mark_animation_used(id);
+        }
+
         Ok(())
     }
 
@@ -1244,11 +1287,17 @@ impl eframe::App for MaBlocksApp {
                                     self.trigger_image_load(path, false);
                                 } else {
                                     self.blocks[index].toggle_animation();
+                                    if self.blocks[index].animation_enabled {
+                                        let id = self.blocks[index].id;
+                                        self.mark_animation_used(id);
+                                    }
                                 }
                             }
                         }
 
                         if remove {
+                            self.animation_access_order
+                                .retain(|&x| x != self.blocks[index].id);
                             self.blocks.remove(index);
                             should_reflow = true;
                         } else {
