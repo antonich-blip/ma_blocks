@@ -198,6 +198,7 @@ impl MaBlocksApp {
     fn poll_image_rx(&mut self, ctx: &egui::Context) {
         if let Some(rx) = self.image_rx.take() {
             let mut got_any = false;
+            let mut added_ids = Vec::new();
             while let Ok(result) = rx.try_recv() {
                 match result {
                     Ok((path, loaded, is_full)) => {
@@ -219,8 +220,9 @@ impl MaBlocksApp {
                         if let Some(id) = update_id {
                             self.mark_animation_used(id);
                         } else {
-                            if let Err(err) = self.insert_loaded_image(ctx, path, loaded, is_full) {
-                                log::error!("{}", err);
+                            match self.insert_loaded_image(ctx, path, loaded, is_full) {
+                                Ok(id) => added_ids.push(id),
+                                Err(err) => log::error!("{}", err),
                             }
                         }
                     }
@@ -231,6 +233,17 @@ impl MaBlocksApp {
                 got_any = true;
             }
             if got_any {
+                if !added_ids.is_empty() {
+                    let max_h = self.get_max_block_height();
+                    if max_h > 0.0 {
+                        for id in added_ids {
+                            if let Some(block) = self.blocks.iter_mut().find(|b| b.id == id) {
+                                let aspect_ratio = block.aspect_ratio;
+                                block.set_preferred_size(vec2(max_h * aspect_ratio, max_h));
+                            }
+                        }
+                    }
+                }
                 self.reorder_and_reflow(None);
             }
             self.image_rx = Some(rx);
@@ -273,7 +286,7 @@ impl MaBlocksApp {
         path: PathBuf,
         loaded: image_loader::LoadedImage,
         is_full: bool,
-    ) -> Result<(), String> {
+    ) -> Result<Uuid, String> {
         if loaded.frames.is_empty() {
             return Err(format!(
                 "{} did not contain renderable frames",
@@ -306,10 +319,14 @@ impl MaBlocksApp {
             self.mark_animation_used(id);
         }
 
-        Ok(())
+        Ok(id)
     }
 
-    fn insert_block_from_path(&mut self, ctx: &egui::Context, path: PathBuf) -> Result<(), String> {
+    fn insert_block_from_path(
+        &mut self,
+        ctx: &egui::Context,
+        path: PathBuf,
+    ) -> Result<Uuid, String> {
         let loaded =
             image_loader::load_image_frames_scaled(&path, Some(MAX_BLOCK_DIMENSION as u32), true)?;
         self.insert_loaded_image(ctx, path, loaded, false)
@@ -372,6 +389,13 @@ impl MaBlocksApp {
             cursor.x += size.x + ALIGN_SPACING;
             row_height = row_height.max(size.y);
         }
+    }
+
+    fn get_max_block_height(&self) -> f32 {
+        self.blocks
+            .iter()
+            .map(|b| b.image_size.y)
+            .fold(0.0, |a, b| a.max(b))
     }
 
     fn can_chain(&self) -> bool {
@@ -1471,7 +1495,7 @@ impl MaBlocksApp {
                 return None;
             }
             if let Ok(path_buf) = Path::new(&data.path).canonicalize() {
-                if let Ok(_) = self.insert_block_from_path(ctx, path_buf) {
+                if let Ok(_new_id) = self.insert_block_from_path(ctx, path_buf) {
                     if let Some(mut block) = self.blocks.pop() {
                         block.id = data.id;
                         block.color = Color32::from_rgba_unmultiplied(

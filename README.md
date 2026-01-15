@@ -54,6 +54,24 @@ MaBlocks2 is designed to handle a large number of images efficiently:
     - **Frame Limits:** Animation sequences are limited to a maximum of 128 frames to prevent excessive memory consumption from long or high-fps animations.
     - **Animation Cache (LRU Purging):** To prevent GPU/RAM overload from many active animations, only the 20 most recently played animations are kept in memory. Older animations are automatically purged (reverting to their first frame) and will be reloaded on demand if played again.
 
+
+## Feature to adjust the height of newly added image blocks to match the tallest block on the canvas. 
+
+Here's a summary of the changes:
+1.  Added get_max_block_height: A helper method in MaBlocksApp to find the height of the tallest block currently on the canvas.
+2.  Updated insert_loaded_image: Modified the return type to return the Uuid of the newly created block, allowing the caller to identify it.
+3.  Enhanced poll_image_rx: When images are loaded (either singly or in bulk), the app now:
+    *   Collects the IDs of all newly inserted blocks.
+    *   Calculates the maximum height among all blocks on the canvas (including the new ones).
+    *   Adjusts the preferred_image_size of each new block to match this maximum height while preserving its original aspect ratio.
+    *   Triggers a reflow to apply these changes.
+This ensures that whenever you add new images, they will automatically scale to match the tallest existing block (or each other, if they are taller than what's already there), maintaining a uniform and organized layout.
+Technical Details:
+- The adjustment happens after a batch of images is received from the loader, ensuring that "bulk" additions are uniform even if they arrive at slightly different times.
+- The logic uses set_preferred_size, so the adjusted height persists through layout reflows and window resizing.
+- Existing blocks that were not part of the current addition are not modified, respecting any manual resizing you might have performed.
+- Loading a session does not trigger this adjustment, preserving the saved sizes of your blocks.
+
 ## User Requirements
 
 1. **Platform:** Whiteboard-type GUI desktop app for Linux (Wayland/X11) and macOS, written in Rust using `eframe`/`egui`.
