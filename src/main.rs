@@ -199,6 +199,10 @@ impl MaBlocksApp {
         if let Some(rx) = self.image_rx.take() {
             let mut got_any = false;
             let mut added_ids = Vec::new();
+
+            // Calculate max height of EXISTING blocks before adding new ones
+            let current_max_h = self.get_max_block_height();
+
             while let Ok(result) = rx.try_recv() {
                 match result {
                     Ok((path, loaded, is_full)) => {
@@ -233,14 +237,14 @@ impl MaBlocksApp {
                 got_any = true;
             }
             if got_any {
-                if !added_ids.is_empty() {
-                    let max_h = self.get_max_block_height();
-                    if max_h > 0.0 {
-                        for id in added_ids {
-                            if let Some(block) = self.blocks.iter_mut().find(|b| b.id == id) {
-                                let aspect_ratio = block.aspect_ratio;
-                                block.set_preferred_size(vec2(max_h * aspect_ratio, max_h));
-                            }
+                if !added_ids.is_empty() && current_max_h > 0.0 {
+                    for id in added_ids {
+                        if let Some(block) = self.blocks.iter_mut().find(|b| b.id == id) {
+                            let aspect_ratio = block.aspect_ratio;
+                            block.set_preferred_size(vec2(
+                                current_max_h * aspect_ratio,
+                                current_max_h,
+                            ));
                         }
                     }
                 }
@@ -394,7 +398,8 @@ impl MaBlocksApp {
     fn get_max_block_height(&self) -> f32 {
         self.blocks
             .iter()
-            .map(|b| b.image_size.y)
+            .filter(|b| !b.is_group)
+            .map(|b| b.preferred_image_size.y)
             .fold(0.0, |a, b| a.max(b))
     }
 
