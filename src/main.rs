@@ -2,8 +2,11 @@ mod block;
 mod image_loader;
 mod paths;
 
-use block::{ImageBlock, BLOCK_PADDING};
-use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, RichText, Sense, UiBuilder, Vec2};
+use block::{
+    block_control_rects, handle_blocks_resizing, BlockControlHover, ImageBlock, InteractionState,
+    ResizeHandle, BLOCK_PADDING, MIN_BLOCK_SIZE,
+};
+use eframe::egui::{self, Color32, Rect, RichText, Sense, UiBuilder, Vec2};
 use egui::{pos2, vec2};
 use paths::AppPaths;
 use serde::{Deserialize, Serialize};
@@ -18,9 +21,10 @@ const CANVAS_PADDING: f32 = 32.0;
 const CANVAS_WORKING_WIDTH: f32 = 1400.0;
 const ALIGN_SPACING: f32 = 24.0;
 const MAX_BLOCK_DIMENSION: f32 = 420.0;
-const MIN_BLOCK_SIZE: f32 = 50.0;
 const MIN_CANVAS_INNER_WIDTH: f32 = MIN_BLOCK_SIZE + BLOCK_PADDING * 2.0;
 const MAX_CACHED_ANIMATIONS: usize = 20;
+
+type ChainedIds = HashSet<Uuid>;
 
 fn main() -> eframe::Result<()> {
     env_logger::init();
@@ -40,22 +44,6 @@ fn main() -> eframe::Result<()> {
             Ok(Box::new(MaBlocksApp::new(cc)))
         }),
     )
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum ResizeHandle {
-    TopLeft,
-    TopRight,
-    BottomLeft,
-    BottomRight,
-}
-
-#[derive(Clone)]
-struct InteractionState {
-    id: Uuid,
-    handle: ResizeHandle,
-    initial_mouse_pos: Pos2,
-    initial_block_rect: Rect,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -96,46 +84,12 @@ struct MaBlocksApp {
     last_boxed_id: Option<Uuid>,
     show_file_names: bool,
     hovered_box_id: Option<Uuid>,
-    remembered_chains: Vec<HashSet<Uuid>>,
-    image_rx: Option<Receiver<Result<(PathBuf, image_loader::LoadedImage, bool), String>>>,
-    image_tx: Sender<Result<(PathBuf, image_loader::LoadedImage, bool), String>>,
+    remembered_chains: Vec<ChainedIds>,
+    image_rx: Option<Receiver<image_loader::ImageLoadResponse>>,
+    image_tx: Sender<image_loader::ImageLoadResponse>,
     /// Tracks the order in which animations were last accessed (played)
     animation_access_order: Vec<Uuid>,
     paths: Option<AppPaths>,
-}
-
-#[derive(Default, Clone, Copy)]
-struct BlockControlHover {
-    close_hovered: bool,
-    chain_hovered: bool,
-    counter_hovered: bool,
-}
-
-fn block_control_rects(rect: Rect, _block: &ImageBlock, zoom: f32) -> (Rect, Rect, Rect) {
-    let btn_size = 16.0 * zoom;
-    let btn_spacing = 4.0 * zoom;
-    let btn_hit_size = btn_size * 1.2;
-
-    let close_rect = Rect::from_center_size(
-        rect.right_top()
-            + Vec2::new(
-                -btn_hit_size / 2.0 - 4.0 * zoom,
-                btn_hit_size / 2.0 + 4.0 * zoom,
-            ),
-        Vec2::splat(btn_hit_size),
-    );
-
-    let chain_rect = Rect::from_center_size(
-        close_rect.center() - Vec2::new(btn_hit_size + btn_spacing, 0.0),
-        Vec2::splat(btn_hit_size),
-    );
-
-    let counter_rect = Rect::from_center_size(
-        chain_rect.center() - Vec2::new(btn_hit_size + btn_spacing, 0.0),
-        Vec2::splat(btn_hit_size),
-    );
-
-    (close_rect, chain_rect, counter_rect)
 }
 
 impl MaBlocksApp {
@@ -414,7 +368,7 @@ impl MaBlocksApp {
     }
 
     fn clear_chain_group(&mut self) {
-        let chained_ids: HashSet<Uuid> = self
+        let chained_ids: ChainedIds = self
             .blocks
             .iter()
             .filter(|b| b.chained)
@@ -753,247 +707,6 @@ impl MaBlocksApp {
         }
         self.reflow_blocks();
     }
-
-    fn render_block(
-        &self,
-        ui: &mut egui::Ui,
-        block: &ImageBlock,
-        rect: Rect,
-        _hovered: bool,
-        show_controls: bool,
-        hover_state: BlockControlHover,
-        is_drop_target: bool,
-    ) {
-        let painter = ui.painter_at(rect);
-        let zoom = self.zoom;
-
-        let image_rect = Rect::from_min_size(
-            pos2(
-                rect.min.x + BLOCK_PADDING * zoom,
-                rect.min.y + BLOCK_PADDING * zoom,
-            ),
-            block.image_size * zoom,
-        );
-
-        let rounding = egui::Rounding::same(6.0 * zoom);
-
-        if block.is_group {
-            let fill_color = if block.chained || is_drop_target {
-                Color32::from_rgb(100, 100, 150)
-            } else {
-                Color32::from_rgb(60, 60, 60)
-            };
-            painter.rect_filled(image_rect, rounding, fill_color);
-
-            let folder_rect = Rect::from_center_size(image_rect.center(), image_rect.size() * 0.9);
-            painter.rect_filled(folder_rect, egui::Rounding::same(2.0 * zoom), block.color);
-            painter.rect_filled(
-                Rect::from_min_max(
-                    folder_rect.left_top() - vec2(0.0, 5.0 * zoom),
-                    folder_rect.left_top() + vec2(folder_rect.width() * 0.4, 0.0),
-                ),
-                egui::Rounding::same(1.0 * zoom),
-                block.color,
-            );
-
-            if let Some(rep_texture) = &block.representative_texture {
-                let tag_size = image_rect.size() * 0.8;
-                let tag_rect = Rect::from_center_size(image_rect.center(), tag_size);
-                let mut tag_shape = egui::epaint::RectShape::filled(
-                    tag_rect,
-                    egui::Rounding::same(2.0 * zoom),
-                    Color32::WHITE,
-                );
-                tag_shape.fill_texture_id = rep_texture.id();
-                tag_shape.uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
-                painter.add(tag_shape);
-            }
-        } else {
-            let mut rect_shape =
-                egui::epaint::RectShape::filled(image_rect, rounding, Color32::WHITE);
-            rect_shape.fill_texture_id = block.texture.id();
-            rect_shape.uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
-            painter.add(rect_shape);
-        }
-
-        if show_controls {
-            let (close_rect, chain_rect, counter_rect) = block_control_rects(rect, block, zoom);
-            let btn_size = 16.0 * zoom;
-            let chain_enabled = self.can_chain();
-
-            painter.circle_filled(
-                close_rect.center(),
-                btn_size / 2.0,
-                if hover_state.close_hovered {
-                    Color32::from_rgb(255, 100, 100)
-                } else {
-                    Color32::RED
-                },
-            );
-            painter.text(
-                close_rect.center(),
-                Align2::CENTER_CENTER,
-                "x",
-                FontId::monospace(12.0 * zoom),
-                Color32::WHITE,
-            );
-
-            let chain_color = if block.chained {
-                Color32::GREEN
-            } else if !chain_enabled {
-                Color32::from_gray(80)
-            } else if hover_state.chain_hovered {
-                Color32::LIGHT_GRAY
-            } else {
-                Color32::GRAY
-            };
-            painter.circle_filled(chain_rect.center(), btn_size / 2.0, chain_color);
-            painter.text(
-                chain_rect.center(),
-                Align2::CENTER_CENTER,
-                "o",
-                FontId::monospace(12.0 * zoom),
-                Color32::WHITE,
-            );
-
-            if !block.is_group {
-                painter.circle_filled(
-                    counter_rect.center(),
-                    btn_size / 2.0,
-                    if hover_state.counter_hovered {
-                        Color32::from_rgb(0, 150, 0)
-                    } else {
-                        Color32::from_rgb(0, 100, 0)
-                    },
-                );
-                painter.text(
-                    counter_rect.center(),
-                    Align2::CENTER_CENTER,
-                    "#",
-                    FontId::monospace(12.0 * zoom),
-                    Color32::WHITE,
-                );
-            }
-        }
-
-        if !block.is_group && block.counter > 0 {
-            let circle_radius = 15.0 * zoom;
-            let circle_center = pos2(
-                rect.min.x + circle_radius + 5.0 * zoom,
-                rect.min.y + circle_radius + 5.0 * zoom,
-            );
-            painter.circle_filled(
-                circle_center,
-                circle_radius,
-                Color32::from_rgba_unmultiplied(0, 100, 0, 170),
-            );
-            painter.text(
-                circle_center,
-                Align2::CENTER_CENTER,
-                block.counter.to_string(),
-                FontId::proportional(20.0 * zoom),
-                Color32::WHITE,
-            );
-        }
-
-        if self.show_file_names {
-            let name = if block.is_group {
-                &block.group_name
-            } else {
-                Path::new(&block.path)
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("unnamed")
-            };
-
-            let font_id = FontId::proportional(12.0 * zoom);
-            let galley = ui
-                .painter()
-                .layout_no_wrap(name.to_string(), font_id, Color32::WHITE);
-
-            let text_pos = image_rect.left_top() + vec2(4.0 * zoom, 4.0 * zoom);
-            let text_rect = Rect::from_min_size(text_pos, galley.size());
-
-            painter.rect_filled(
-                text_rect.expand(2.0 * zoom),
-                egui::Rounding::same(2.0 * zoom),
-                Color32::from_black_alpha(180),
-            );
-            painter.galley(text_pos, galley, Color32::WHITE);
-        }
-    }
-
-    fn handle_resizing(&mut self, curr_mouse_pos: Pos2) {
-        if let Some(state) = &self.resizing_state {
-            if let Some(idx) = self.blocks.iter().position(|b| b.id == state.id) {
-                let delta_world = (curr_mouse_pos - state.initial_mouse_pos) / self.zoom;
-                let original_center = state.initial_block_rect.center();
-                let min_size = MIN_BLOCK_SIZE;
-
-                let initial_image_width = state.initial_block_rect.width() - BLOCK_PADDING * 2.0;
-                let initial_image_height = state.initial_block_rect.height() - BLOCK_PADDING * 2.0;
-                let half_width = initial_image_width * 0.5;
-                let half_height = initial_image_height * 0.5;
-
-                let x_sign = match state.handle {
-                    ResizeHandle::TopLeft | ResizeHandle::BottomLeft => -1.0,
-                    _ => 1.0,
-                };
-                let y_sign = match state.handle {
-                    ResizeHandle::TopLeft | ResizeHandle::TopRight => -1.0,
-                    _ => 1.0,
-                };
-
-                let target_offset_x = half_width * x_sign + delta_world.x;
-                let width_from_x = (2.0 * target_offset_x.abs()).max(min_size);
-
-                let target_offset_y = half_height * y_sign + delta_world.y;
-                let height_from_y = 2.0 * target_offset_y.abs();
-                let width_from_y = (height_from_y * self.blocks[idx].aspect_ratio).max(min_size);
-
-                let mut new_width = if delta_world.x.abs() >= delta_world.y.abs() {
-                    width_from_x
-                } else {
-                    width_from_y
-                };
-
-                if !new_width.is_finite() || new_width.is_nan() {
-                    new_width = min_size;
-                }
-                new_width = new_width.max(min_size);
-
-                let new_height = new_width / self.blocks[idx].aspect_ratio;
-                let new_size = vec2(new_width, new_height);
-                let new_outer_size = new_size + Vec2::splat(BLOCK_PADDING * 2.0);
-                let new_rect = Rect::from_center_size(original_center, new_outer_size);
-
-                self.blocks[idx].position = new_rect.min;
-                self.blocks[idx].set_preferred_size(new_size);
-
-                if self.blocks[idx].chained {
-                    let chained_count = self.blocks.iter().filter(|b| b.chained).count();
-                    if chained_count > 1 {
-                        for i in 0..self.blocks.len() {
-                            if self.blocks[i].chained && i != idx {
-                                let aspect_ratio = self.blocks[i].aspect_ratio;
-                                let chained_width = (new_height * aspect_ratio).max(MIN_BLOCK_SIZE);
-                                let chained_size = vec2(chained_width, new_height);
-                                let chained_outer_size =
-                                    chained_size + Vec2::splat(BLOCK_PADDING * 2.0);
-
-                                let original_center = self.blocks[i].rect().center();
-                                let chained_rect =
-                                    Rect::from_center_size(original_center, chained_outer_size);
-
-                                self.blocks[i].position = chained_rect.min;
-                                self.blocks[i].set_preferred_size(chained_size);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
 
 impl eframe::App for MaBlocksApp {
@@ -1007,6 +720,20 @@ impl eframe::App for MaBlocksApp {
         self.advance_animations(dt, ctx);
         self.enforce_chain_constraints();
 
+        self.render_toolbar(ctx);
+
+        let (dropped_leader_id, should_reflow) = self.render_canvas(ctx);
+
+        if let Some(leader_id) = dropped_leader_id {
+            self.reorder_and_reflow(Some(leader_id));
+        } else if should_reflow {
+            self.reflow_blocks();
+        }
+    }
+}
+
+impl MaBlocksApp {
+    fn render_toolbar(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("toolbar")
             .frame(
                 egui::Frame::default()
@@ -1077,9 +804,12 @@ impl eframe::App for MaBlocksApp {
                     }
                 });
             });
+    }
 
+    fn render_canvas(&mut self, ctx: &egui::Context) -> (Option<Uuid>, bool) {
         let mut dropped_leader_id = None;
         let mut should_reflow = false;
+
         egui::CentralPanel::default().show(ctx, |ui| {
             let zoom_delta = ui.input(|i| i.zoom_delta());
             if zoom_delta != 1.0 {
@@ -1113,7 +843,9 @@ impl eframe::App for MaBlocksApp {
             }
 
             if let Some(curr_mouse_pos) = mouse_pos {
-                self.handle_resizing(curr_mouse_pos);
+                if let Some(state) = &self.resizing_state {
+                    handle_blocks_resizing(&mut self.blocks, state, curr_mouse_pos, self.zoom);
+                }
             }
 
             egui::ScrollArea::both()
@@ -1328,12 +1060,13 @@ impl eframe::App for MaBlocksApp {
                             || (is_any_dragging && self.blocks[index].chained);
 
                         if !should_render_on_top {
-                            self.render_block(
+                            self.blocks[index].render(
                                 &mut canvas_ui,
-                                &self.blocks[index],
                                 block_rect,
-                                is_hovering_block,
+                                zoom,
                                 show_controls,
+                                self.show_file_names,
+                                self.can_chain(),
                                 hover_state,
                                 false,
                             );
@@ -1386,14 +1119,32 @@ impl eframe::App for MaBlocksApp {
                         }
                     }
 
-                    for (id, rect, h, s, state) in dragging_blocks_to_render {
+                    for (id, rect, _h, s, state) in dragging_blocks_to_render {
                         if let Some(block) = self.blocks.iter().find(|b| b.id == id) {
-                            self.render_block(&mut canvas_ui, block, rect, h, s, state, false);
+                            block.render(
+                                &mut canvas_ui,
+                                rect,
+                                zoom,
+                                s,
+                                self.show_file_names,
+                                self.can_chain(),
+                                state,
+                                false,
+                            );
                         }
                     }
-                    if let Some((id, rect, h, s, state)) = hovered_box_to_render {
+                    if let Some((id, rect, _h, s, state)) = hovered_box_to_render {
                         if let Some(block) = self.blocks.iter().find(|b| b.id == id) {
-                            self.render_block(&mut canvas_ui, block, rect, h, s, state, true);
+                            block.render(
+                                &mut canvas_ui,
+                                rect,
+                                zoom,
+                                s,
+                                self.show_file_names,
+                                self.can_chain(),
+                                state,
+                                true,
+                            );
                         }
                     }
 
@@ -1414,15 +1165,9 @@ impl eframe::App for MaBlocksApp {
                 });
         });
 
-        if let Some(leader_id) = dropped_leader_id {
-            self.reorder_and_reflow(Some(leader_id));
-        } else if should_reflow {
-            self.reflow_blocks();
-        }
+        (dropped_leader_id, should_reflow)
     }
-}
 
-impl MaBlocksApp {
     fn save_session(&mut self) {
         let mut dialog = rfd::FileDialog::new()
             .add_filter("Session", &["json"])
@@ -1551,7 +1296,7 @@ impl MaBlocksApp {
                                 .filter_map(|s| Uuid::parse_str(&s).ok())
                                 .collect()
                         })
-                        .filter(|chain: &HashSet<Uuid>| chain.len() >= 2)
+                        .filter(|chain: &ChainedIds| chain.len() >= 2)
                         .collect();
                     self.session_file = Some(path);
                     self.reorder_and_reflow(None);

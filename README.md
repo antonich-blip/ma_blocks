@@ -66,6 +66,7 @@ Here's a summary of the changes:
     *   Adjusts the preferred_image_size of each new block to match this maximum height while preserving its original aspect ratio.
     *   Triggers a reflow to apply these changes.
 This ensures that whenever you add new images, they will automatically scale to match the tallest existing block (or each other, if they are taller than what's already there), maintaining a uniform and organized layout.
+
 Technical Details:
 - The adjustment happens after a batch of images is received from the loader, ensuring that "bulk" additions are uniform even if they arrive at slightly different times.
 - The logic uses set_preferred_size, so the adjusted height persists through layout reflows and window resizing.

@@ -1,9 +1,61 @@
 use crate::image_loader::AnimationFrame;
-use eframe::egui::{self, Pos2, Rect, Vec2};
+use eframe::egui::{self, pos2, vec2, Align2, Color32, FontId, Pos2, Rect, Vec2};
+use std::path::Path;
 use std::time::Duration;
 use uuid::Uuid;
 
 pub const BLOCK_PADDING: f32 = 4.0;
+pub const MIN_BLOCK_SIZE: f32 = 50.0;
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum ResizeHandle {
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+#[derive(Clone)]
+pub struct InteractionState {
+    pub id: Uuid,
+    pub handle: ResizeHandle,
+    pub initial_mouse_pos: Pos2,
+    pub initial_block_rect: Rect,
+}
+
+#[derive(Default, Clone, Copy)]
+pub struct BlockControlHover {
+    pub close_hovered: bool,
+    pub chain_hovered: bool,
+    pub counter_hovered: bool,
+}
+
+pub fn block_control_rects(rect: Rect, _block: &ImageBlock, zoom: f32) -> (Rect, Rect, Rect) {
+    let btn_size = 16.0 * zoom;
+    let btn_spacing = 4.0 * zoom;
+    let btn_hit_size = btn_size * 1.2;
+
+    let close_rect = Rect::from_center_size(
+        rect.right_top()
+            + Vec2::new(
+                -btn_hit_size / 2.0 - 4.0 * zoom,
+                btn_hit_size / 2.0 + 4.0 * zoom,
+            ),
+        Vec2::splat(btn_hit_size),
+    );
+
+    let chain_rect = Rect::from_center_size(
+        close_rect.center() - Vec2::new(btn_hit_size + btn_spacing, 0.0),
+        Vec2::splat(btn_hit_size),
+    );
+
+    let counter_rect = Rect::from_center_size(
+        chain_rect.center() - Vec2::new(btn_hit_size + btn_spacing, 0.0),
+        Vec2::splat(btn_hit_size),
+    );
+
+    (close_rect, chain_rect, counter_rect)
+}
 
 pub struct ImageBlock {
     pub id: Uuid,
@@ -185,6 +237,248 @@ impl ImageBlock {
         self.counter = 0;
         for child in &mut self.children {
             child.reset_counters_recursive();
+        }
+    }
+
+    pub fn render(
+        &self,
+        ui: &mut egui::Ui,
+        rect: Rect,
+        zoom: f32,
+        show_controls: bool,
+        show_file_names: bool,
+        can_chain: bool,
+        hover_state: BlockControlHover,
+        is_drop_target: bool,
+    ) {
+        let painter = ui.painter_at(rect);
+
+        let image_rect = Rect::from_min_size(
+            pos2(
+                rect.min.x + BLOCK_PADDING * zoom,
+                rect.min.y + BLOCK_PADDING * zoom,
+            ),
+            self.image_size * zoom,
+        );
+
+        let rounding = egui::Rounding::same(6.0 * zoom);
+
+        if self.is_group {
+            let fill_color = if self.chained || is_drop_target {
+                Color32::from_rgb(100, 100, 150)
+            } else {
+                Color32::from_rgb(60, 60, 60)
+            };
+            painter.rect_filled(image_rect, rounding, fill_color);
+
+            let folder_rect = Rect::from_center_size(image_rect.center(), image_rect.size() * 0.9);
+            painter.rect_filled(folder_rect, egui::Rounding::same(2.0 * zoom), self.color);
+            painter.rect_filled(
+                Rect::from_min_max(
+                    folder_rect.left_top() - vec2(0.0, 5.0 * zoom),
+                    folder_rect.left_top() + vec2(folder_rect.width() * 0.4, 0.0),
+                ),
+                egui::Rounding::same(1.0 * zoom),
+                self.color,
+            );
+
+            if let Some(rep_texture) = &self.representative_texture {
+                let tag_size = image_rect.size() * 0.8;
+                let tag_rect = Rect::from_center_size(image_rect.center(), tag_size);
+                let mut tag_shape = egui::epaint::RectShape::filled(
+                    tag_rect,
+                    egui::Rounding::same(2.0 * zoom),
+                    Color32::WHITE,
+                );
+                tag_shape.fill_texture_id = rep_texture.id();
+                tag_shape.uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+                painter.add(tag_shape);
+            }
+        } else {
+            let mut rect_shape =
+                egui::epaint::RectShape::filled(image_rect, rounding, Color32::WHITE);
+            rect_shape.fill_texture_id = self.texture.id();
+            rect_shape.uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+            painter.add(rect_shape);
+        }
+
+        if show_controls {
+            let (close_rect, chain_rect, counter_rect) = block_control_rects(rect, self, zoom);
+            let btn_size = 16.0 * zoom;
+
+            painter.circle_filled(
+                close_rect.center(),
+                btn_size / 2.0,
+                if hover_state.close_hovered {
+                    Color32::from_rgb(255, 100, 100)
+                } else {
+                    Color32::RED
+                },
+            );
+            painter.text(
+                close_rect.center(),
+                Align2::CENTER_CENTER,
+                "x",
+                FontId::monospace(12.0 * zoom),
+                Color32::WHITE,
+            );
+
+            let chain_color = if self.chained {
+                Color32::GREEN
+            } else if !can_chain {
+                Color32::from_gray(80)
+            } else if hover_state.chain_hovered {
+                Color32::LIGHT_GRAY
+            } else {
+                Color32::GRAY
+            };
+            painter.circle_filled(chain_rect.center(), btn_size / 2.0, chain_color);
+            painter.text(
+                chain_rect.center(),
+                Align2::CENTER_CENTER,
+                "o",
+                FontId::monospace(12.0 * zoom),
+                Color32::WHITE,
+            );
+
+            if !self.is_group {
+                painter.circle_filled(
+                    counter_rect.center(),
+                    btn_size / 2.0,
+                    if hover_state.counter_hovered {
+                        Color32::from_rgb(0, 150, 0)
+                    } else {
+                        Color32::from_rgb(0, 100, 0)
+                    },
+                );
+                painter.text(
+                    counter_rect.center(),
+                    Align2::CENTER_CENTER,
+                    "#",
+                    FontId::monospace(12.0 * zoom),
+                    Color32::WHITE,
+                );
+            }
+        }
+
+        if !self.is_group && self.counter > 0 {
+            let circle_radius = 15.0 * zoom;
+            let circle_center = pos2(
+                rect.min.x + circle_radius + 5.0 * zoom,
+                rect.min.y + circle_radius + 5.0 * zoom,
+            );
+            painter.circle_filled(
+                circle_center,
+                circle_radius,
+                Color32::from_rgba_unmultiplied(0, 100, 0, 170),
+            );
+            painter.text(
+                circle_center,
+                Align2::CENTER_CENTER,
+                self.counter.to_string(),
+                FontId::proportional(20.0 * zoom),
+                Color32::WHITE,
+            );
+        }
+
+        if show_file_names {
+            let name = if self.is_group {
+                &self.group_name
+            } else {
+                Path::new(&self.path)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("unnamed")
+            };
+
+            let font_id = FontId::proportional(12.0 * zoom);
+            let galley = ui
+                .painter()
+                .layout_no_wrap(name.to_string(), font_id, Color32::WHITE);
+
+            let text_pos = image_rect.left_top() + vec2(4.0 * zoom, 4.0 * zoom);
+            let text_rect = Rect::from_min_size(text_pos, galley.size());
+
+            painter.rect_filled(
+                text_rect.expand(2.0 * zoom),
+                egui::Rounding::same(2.0 * zoom),
+                Color32::from_black_alpha(180),
+            );
+            painter.galley(text_pos, galley, Color32::WHITE);
+        }
+    }
+}
+
+pub fn handle_blocks_resizing(
+    blocks: &mut [ImageBlock],
+    resizing_state: &InteractionState,
+    curr_mouse_pos: Pos2,
+    zoom: f32,
+) {
+    if let Some(idx) = blocks.iter().position(|b| b.id == resizing_state.id) {
+        let delta_world = (curr_mouse_pos - resizing_state.initial_mouse_pos) / zoom;
+        let original_center = resizing_state.initial_block_rect.center();
+        let min_size = MIN_BLOCK_SIZE;
+
+        let initial_image_width = resizing_state.initial_block_rect.width() - BLOCK_PADDING * 2.0;
+        let initial_image_height = resizing_state.initial_block_rect.height() - BLOCK_PADDING * 2.0;
+        let half_width = initial_image_width * 0.5;
+        let half_height = initial_image_height * 0.5;
+
+        let x_sign = match resizing_state.handle {
+            ResizeHandle::TopLeft | ResizeHandle::BottomLeft => -1.0,
+            _ => 1.0,
+        };
+        let y_sign = match resizing_state.handle {
+            ResizeHandle::TopLeft | ResizeHandle::TopRight => -1.0,
+            _ => 1.0,
+        };
+
+        let target_offset_x = half_width * x_sign + delta_world.x;
+        let width_from_x = (2.0 * target_offset_x.abs()).max(min_size);
+
+        let target_offset_y = half_height * y_sign + delta_world.y;
+        let height_from_y = 2.0 * target_offset_y.abs();
+        let width_from_y = (height_from_y * blocks[idx].aspect_ratio).max(min_size);
+
+        let mut new_width = if delta_world.x.abs() >= delta_world.y.abs() {
+            width_from_x
+        } else {
+            width_from_y
+        };
+
+        if !new_width.is_finite() || new_width.is_nan() {
+            new_width = min_size;
+        }
+        new_width = new_width.max(min_size);
+
+        let new_height = new_width / blocks[idx].aspect_ratio;
+        let new_size = vec2(new_width, new_height);
+        let new_outer_size = new_size + Vec2::splat(BLOCK_PADDING * 2.0);
+        let new_rect = Rect::from_center_size(original_center, new_outer_size);
+
+        blocks[idx].position = new_rect.min;
+        blocks[idx].set_preferred_size(new_size);
+
+        if blocks[idx].chained {
+            let chained_count = blocks.iter().filter(|b| b.chained).count();
+            if chained_count > 1 {
+                for i in 0..blocks.len() {
+                    if blocks[i].chained && i != idx {
+                        let aspect_ratio = blocks[i].aspect_ratio;
+                        let chained_width = (new_height * aspect_ratio).max(MIN_BLOCK_SIZE);
+                        let chained_size = vec2(chained_width, new_height);
+                        let chained_outer_size = chained_size + Vec2::splat(BLOCK_PADDING * 2.0);
+
+                        let original_center = blocks[i].rect().center();
+                        let chained_rect =
+                            Rect::from_center_size(original_center, chained_outer_size);
+
+                        blocks[i].position = chained_rect.min;
+                        blocks[i].set_preferred_size(chained_size);
+                    }
+                }
+            }
         }
     }
 }

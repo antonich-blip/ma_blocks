@@ -28,6 +28,9 @@ pub struct LoadedImage {
     pub has_animation: bool,
 }
 
+pub type ImageLoadResult = (std::path::PathBuf, LoadedImage, bool);
+pub type ImageLoadResponse = Result<ImageLoadResult, String>;
+
 impl LoadedImage {
     pub fn from_frames(frames: Vec<AnimationFrame>, has_animation: bool) -> Self {
         let original_size = frames
