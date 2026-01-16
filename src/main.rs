@@ -3,8 +3,8 @@ mod image_loader;
 mod paths;
 
 use block::{
-    block_control_rects, handle_blocks_resizing, BlockControlHover, ImageBlock, InteractionState,
-    ResizeHandle, BLOCK_PADDING, MIN_BLOCK_SIZE,
+    block_control_rects, handle_blocks_resizing, BlockControlHover, BlockRenderConfig, ImageBlock,
+    InteractionState, ResizeHandle, BLOCK_PADDING, MIN_BLOCK_SIZE,
 };
 use eframe::egui::{self, Color32, Rect, RichText, Sense, UiBuilder, Vec2};
 use egui::{pos2, vec2};
@@ -1059,36 +1059,29 @@ impl MaBlocksApp {
                             || self.blocks[index].is_dragging
                             || (is_any_dragging && self.blocks[index].chained);
 
+                        let config = BlockRenderConfig {
+                            zoom,
+                            show_controls,
+                            show_file_names: self.show_file_names,
+                            can_chain: self.can_chain(),
+                            is_drop_target: false,
+                            hover_state,
+                        };
+
                         if !should_render_on_top {
-                            self.blocks[index].render(
-                                &mut canvas_ui,
-                                block_rect,
-                                zoom,
-                                show_controls,
-                                self.show_file_names,
-                                self.can_chain(),
-                                hover_state,
-                                false,
-                            );
+                            self.blocks[index].render(&mut canvas_ui, block_rect, config);
                         }
 
                         if is_hovered_box {
-                            hovered_box_to_render = Some((
-                                self.blocks[index].id,
-                                block_rect,
-                                is_hovering_block,
-                                show_controls,
-                                hover_state,
-                            ));
+                            hovered_box_to_render =
+                                Some((self.blocks[index].id, block_rect, config));
                         } else if self.blocks[index].is_dragging
                             || (is_any_dragging && self.blocks[index].chained)
                         {
                             dragging_blocks_to_render.push((
                                 self.blocks[index].id,
                                 block_rect,
-                                is_hovering_block,
-                                show_controls,
-                                hover_state,
+                                config,
                             ));
                         }
 
@@ -1119,32 +1112,15 @@ impl MaBlocksApp {
                         }
                     }
 
-                    for (id, rect, _h, s, state) in dragging_blocks_to_render {
+                    for (id, rect, config) in dragging_blocks_to_render {
                         if let Some(block) = self.blocks.iter().find(|b| b.id == id) {
-                            block.render(
-                                &mut canvas_ui,
-                                rect,
-                                zoom,
-                                s,
-                                self.show_file_names,
-                                self.can_chain(),
-                                state,
-                                false,
-                            );
+                            block.render(&mut canvas_ui, rect, config);
                         }
                     }
-                    if let Some((id, rect, _h, s, state)) = hovered_box_to_render {
+                    if let Some((id, rect, mut config)) = hovered_box_to_render {
                         if let Some(block) = self.blocks.iter().find(|b| b.id == id) {
-                            block.render(
-                                &mut canvas_ui,
-                                rect,
-                                zoom,
-                                s,
-                                self.show_file_names,
-                                self.can_chain(),
-                                state,
-                                true,
-                            );
+                            config.is_drop_target = true;
+                            block.render(&mut canvas_ui, rect, config);
                         }
                     }
 

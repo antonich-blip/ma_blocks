@@ -82,6 +82,16 @@ pub struct ImageBlock {
     pub is_full_sequence: bool,
 }
 
+#[derive(Clone, Copy)]
+pub struct BlockRenderConfig {
+    pub zoom: f32,
+    pub show_controls: bool,
+    pub show_file_names: bool,
+    pub can_chain: bool,
+    pub is_drop_target: bool,
+    pub hover_state: BlockControlHover,
+}
+
 impl ImageBlock {
     pub fn new(
         path: String,
@@ -240,31 +250,21 @@ impl ImageBlock {
         }
     }
 
-    pub fn render(
-        &self,
-        ui: &mut egui::Ui,
-        rect: Rect,
-        zoom: f32,
-        show_controls: bool,
-        show_file_names: bool,
-        can_chain: bool,
-        hover_state: BlockControlHover,
-        is_drop_target: bool,
-    ) {
+    pub fn render(&self, ui: &mut egui::Ui, rect: Rect, config: BlockRenderConfig) {
         let painter = ui.painter_at(rect);
 
         let image_rect = Rect::from_min_size(
             pos2(
-                rect.min.x + BLOCK_PADDING * zoom,
-                rect.min.y + BLOCK_PADDING * zoom,
+                rect.min.x + BLOCK_PADDING * config.zoom,
+                rect.min.y + BLOCK_PADDING * config.zoom,
             ),
-            self.image_size * zoom,
+            self.image_size * config.zoom,
         );
 
-        let rounding = egui::Rounding::same(6.0 * zoom);
+        let rounding = egui::Rounding::same(6.0 * config.zoom);
 
         if self.is_group {
-            let fill_color = if self.chained || is_drop_target {
+            let fill_color = if self.chained || config.is_drop_target {
                 Color32::from_rgb(100, 100, 150)
             } else {
                 Color32::from_rgb(60, 60, 60)
@@ -272,13 +272,17 @@ impl ImageBlock {
             painter.rect_filled(image_rect, rounding, fill_color);
 
             let folder_rect = Rect::from_center_size(image_rect.center(), image_rect.size() * 0.9);
-            painter.rect_filled(folder_rect, egui::Rounding::same(2.0 * zoom), self.color);
+            painter.rect_filled(
+                folder_rect,
+                egui::Rounding::same(2.0 * config.zoom),
+                self.color,
+            );
             painter.rect_filled(
                 Rect::from_min_max(
-                    folder_rect.left_top() - vec2(0.0, 5.0 * zoom),
+                    folder_rect.left_top() - vec2(0.0, 5.0 * config.zoom),
                     folder_rect.left_top() + vec2(folder_rect.width() * 0.4, 0.0),
                 ),
-                egui::Rounding::same(1.0 * zoom),
+                egui::Rounding::same(1.0 * config.zoom),
                 self.color,
             );
 
@@ -287,7 +291,7 @@ impl ImageBlock {
                 let tag_rect = Rect::from_center_size(image_rect.center(), tag_size);
                 let mut tag_shape = egui::epaint::RectShape::filled(
                     tag_rect,
-                    egui::Rounding::same(2.0 * zoom),
+                    egui::Rounding::same(2.0 * config.zoom),
                     Color32::WHITE,
                 );
                 tag_shape.fill_texture_id = rep_texture.id();
@@ -302,14 +306,15 @@ impl ImageBlock {
             painter.add(rect_shape);
         }
 
-        if show_controls {
-            let (close_rect, chain_rect, counter_rect) = block_control_rects(rect, self, zoom);
-            let btn_size = 16.0 * zoom;
+        if config.show_controls {
+            let (close_rect, chain_rect, counter_rect) =
+                block_control_rects(rect, self, config.zoom);
+            let btn_size = 16.0 * config.zoom;
 
             painter.circle_filled(
                 close_rect.center(),
                 btn_size / 2.0,
-                if hover_state.close_hovered {
+                if config.hover_state.close_hovered {
                     Color32::from_rgb(255, 100, 100)
                 } else {
                     Color32::RED
@@ -319,15 +324,15 @@ impl ImageBlock {
                 close_rect.center(),
                 Align2::CENTER_CENTER,
                 "x",
-                FontId::monospace(12.0 * zoom),
+                FontId::monospace(12.0 * config.zoom),
                 Color32::WHITE,
             );
 
             let chain_color = if self.chained {
                 Color32::GREEN
-            } else if !can_chain {
+            } else if !config.can_chain {
                 Color32::from_gray(80)
-            } else if hover_state.chain_hovered {
+            } else if config.hover_state.chain_hovered {
                 Color32::LIGHT_GRAY
             } else {
                 Color32::GRAY
@@ -337,7 +342,7 @@ impl ImageBlock {
                 chain_rect.center(),
                 Align2::CENTER_CENTER,
                 "o",
-                FontId::monospace(12.0 * zoom),
+                FontId::monospace(12.0 * config.zoom),
                 Color32::WHITE,
             );
 
@@ -345,7 +350,7 @@ impl ImageBlock {
                 painter.circle_filled(
                     counter_rect.center(),
                     btn_size / 2.0,
-                    if hover_state.counter_hovered {
+                    if config.hover_state.counter_hovered {
                         Color32::from_rgb(0, 150, 0)
                     } else {
                         Color32::from_rgb(0, 100, 0)
@@ -355,17 +360,17 @@ impl ImageBlock {
                     counter_rect.center(),
                     Align2::CENTER_CENTER,
                     "#",
-                    FontId::monospace(12.0 * zoom),
+                    FontId::monospace(12.0 * config.zoom),
                     Color32::WHITE,
                 );
             }
         }
 
         if !self.is_group && self.counter > 0 {
-            let circle_radius = 15.0 * zoom;
+            let circle_radius = 15.0 * config.zoom;
             let circle_center = pos2(
-                rect.min.x + circle_radius + 5.0 * zoom,
-                rect.min.y + circle_radius + 5.0 * zoom,
+                rect.min.x + circle_radius + 5.0 * config.zoom,
+                rect.min.y + circle_radius + 5.0 * config.zoom,
             );
             painter.circle_filled(
                 circle_center,
@@ -376,12 +381,12 @@ impl ImageBlock {
                 circle_center,
                 Align2::CENTER_CENTER,
                 self.counter.to_string(),
-                FontId::proportional(20.0 * zoom),
+                FontId::proportional(20.0 * config.zoom),
                 Color32::WHITE,
             );
         }
 
-        if show_file_names {
+        if config.show_file_names {
             let name = if self.is_group {
                 &self.group_name
             } else {
@@ -391,17 +396,17 @@ impl ImageBlock {
                     .unwrap_or("unnamed")
             };
 
-            let font_id = FontId::proportional(12.0 * zoom);
+            let font_id = FontId::proportional(12.0 * config.zoom);
             let galley = ui
                 .painter()
                 .layout_no_wrap(name.to_string(), font_id, Color32::WHITE);
 
-            let text_pos = image_rect.left_top() + vec2(4.0 * zoom, 4.0 * zoom);
+            let text_pos = image_rect.left_top() + vec2(4.0 * config.zoom, 4.0 * config.zoom);
             let text_rect = Rect::from_min_size(text_pos, galley.size());
 
             painter.rect_filled(
-                text_rect.expand(2.0 * zoom),
-                egui::Rounding::same(2.0 * zoom),
+                text_rect.expand(2.0 * config.zoom),
+                egui::Rounding::same(2.0 * config.zoom),
                 Color32::from_black_alpha(180),
             );
             painter.galley(text_pos, galley, Color32::WHITE);
