@@ -58,6 +58,10 @@ struct Session {
     blocks: Vec<BlockData>,
     #[serde(default)]
     remembered_chains: Vec<Vec<String>>,
+    #[serde(default)]
+    last_unboxed_ids: Vec<Uuid>,
+    #[serde(default)]
+    last_boxed_id: Option<Uuid>,
 }
 
 /// Serialized form of an ImageBlock for persistence.
@@ -1208,6 +1212,8 @@ impl MaBlocksApp {
             let session = Session {
                 blocks: self.blocks.iter().map(|b| self.block_to_data(b)).collect(),
                 remembered_chains: self.serialize_remembered_chains(),
+                last_unboxed_ids: self.last_unboxed_ids.clone(),
+                last_boxed_id: self.last_boxed_id,
             };
 
             if let Ok(file) = std::fs::File::create(&path) {
@@ -1344,6 +1350,8 @@ impl MaBlocksApp {
                     }
                     self.remembered_chains =
                         Self::parse_remembered_chains(session.remembered_chains);
+                    self.last_unboxed_ids = session.last_unboxed_ids;
+                    self.last_boxed_id = session.last_boxed_id;
                     self.session_file = Some(path);
                     self.reorder_and_reflow(None);
                 }
