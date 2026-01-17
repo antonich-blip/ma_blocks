@@ -799,23 +799,7 @@ impl MaBlocksApp {
                 ctrl: i.modifiers.ctrl,
             });
 
-            if input.zoom_delta != 1.0 {
-                self.zoom = (self.zoom * input.zoom_delta).clamp(0.1, 10.0);
-            }
-
-            let available_width = ui.available_width();
-            let mut target_inner_width = if available_width.is_finite() {
-                (available_width / self.zoom - CANVAS_PADDING * 2.0).max(MIN_CANVAS_INNER_WIDTH)
-            } else {
-                CANVAS_WORKING_WIDTH / self.zoom
-            };
-            if target_inner_width.is_nan() {
-                target_inner_width = CANVAS_WORKING_WIDTH / self.zoom;
-            }
-            if (target_inner_width - self.working_inner_width).abs() > 0.5 {
-                self.working_inner_width = target_inner_width;
-                self.reflow_blocks();
-            }
+            self.handle_zoom_input(ui, &input);
 
             if input.secondary_released {
                 self.resizing_state = None;
@@ -887,136 +871,58 @@ impl MaBlocksApp {
 
                         let block = &self.blocks[index];
                         let rects = block_control_rects(block_rect, zoom);
-
                         let block_id = canvas_ui.id().with(block.id);
                         let is_hovering_block =
                             input.hover_pos.is_some_and(|p| block_rect.contains(p));
-
                         let hover_state = BlockControlHover::from_mouse_pos(
                             input.hover_pos,
                             &rects,
                             block.group.is_group,
                         );
-
                         let any_button_hovered = hover_state.close_hovered
                             || hover_state.chain_hovered
                             || hover_state.counter_hovered;
 
                         let mut remove = false;
-                        if input.primary_clicked {
-                            if hover_state.close_hovered {
-                                remove = true;
-                                self.skip_chain_cancel = true;
-                            } else if hover_state.chain_hovered {
-                                self.toggle_chain_for_block(index);
-                            } else if hover_state.counter_hovered {
-                                self.blocks[index].counter += 1;
-                                self.skip_chain_cancel = true;
-                            }
-                        }
-
-                        if input.secondary_clicked && hover_state.counter_hovered {
-                            self.blocks[index].counter = (self.blocks[index].counter - 1).max(0);
+                        if input.primary_clicked && hover_state.close_hovered {
+                            remove = true;
                             self.skip_chain_cancel = true;
                         }
 
-                        if input.secondary_pressed && is_hovering_block && !any_button_hovered {
-                            if let Some(m_pos) = input.hover_pos {
-                                let world_mouse = (m_pos - canvas_origin) / zoom;
-                                let center = self.blocks[index].rect().center();
-                                let handle =
-                                    match (world_mouse.x < center.x, world_mouse.y < center.y) {
-                                        (true, true) => ResizeHandle::TopLeft,
-                                        (false, true) => ResizeHandle::TopRight,
-                                        (true, false) => ResizeHandle::BottomLeft,
-                                        (false, false) => ResizeHandle::BottomRight,
-                                    };
-                                self.resizing_state = Some(InteractionState {
-                                    id: self.blocks[index].id,
-                                    handle,
-                                    initial_mouse_pos: m_pos,
-                                    initial_block_rect: self.blocks[index].rect(),
-                                });
-                            }
-                        }
-
-                        let block_sense = Sense::click_and_drag();
-                        let response = canvas_ui.interact(block_rect, block_id, block_sense);
-
-                        if response.drag_started_by(egui::PointerButton::Primary)
-                            && !any_button_hovered
+                        if !remove
+                            && self.handle_block_interaction(
+                                index,
+                                &input,
+                                canvas_origin,
+                                zoom,
+                                &hover_state,
+                                is_hovering_block,
+                            )
                         {
-                            if let Some(pointer) = response.interact_pointer_pos() {
-                                let block = &mut self.blocks[index];
-                                block.pos.drag_offset = (pointer - canvas_origin) / zoom
-                                    - vec2(block.pos.position.x, block.pos.position.y);
-                                block.pos.is_dragging = true;
-                            }
+                            self.skip_chain_cancel = true;
                         }
 
-                        if self.blocks[index].pos.is_dragging
-                            && response.dragged_by(egui::PointerButton::Primary)
-                        {
-                            if let Some(pointer) = response.interact_pointer_pos() {
-                                let viewport = ui.clip_rect();
-                                let mut scroll_delta = 0.0;
-                                if pointer.y < viewport.min.y {
-                                    scroll_delta = viewport.min.y - pointer.y;
-                                } else if pointer.y > viewport.max.y {
-                                    scroll_delta = viewport.max.y - pointer.y;
-                                }
+                        let response =
+                            canvas_ui.interact(block_rect, block_id, Sense::click_and_drag());
 
-                                if scroll_delta != 0.0 {
-                                    ui.scroll_with_delta(vec2(0.0, scroll_delta));
-                                    ui.ctx().request_repaint();
-                                }
-
-                                let old_pos = self.blocks[index].pos.position;
-                                let current_canvas_origin = canvas_origin + vec2(0.0, scroll_delta);
-                                let new_pos = (pointer - current_canvas_origin) / zoom
-                                    - self.blocks[index].pos.drag_offset;
-                                let delta = pos2(new_pos.x, new_pos.y) - old_pos;
-
-                                let is_chained = self.blocks[index].chained;
-                                let leader_id = self.blocks[index].id;
-
-                                self.blocks[index].pos.position = pos2(new_pos.x, new_pos.y);
-
-                                if is_chained {
-                                    for other in &mut self.blocks {
-                                        if other.chained && other.id != leader_id {
-                                            other.pos.position += delta;
-                                        }
-                                    }
-                                }
+                        if !remove {
+                            let (d_id, s_reflow, removed) = self.process_block_drag(
+                                index,
+                                &response,
+                                canvas_origin,
+                                zoom,
+                                &input,
+                                ui,
+                            );
+                            if let Some(id) = d_id {
+                                dropped_leader_id = Some(id);
                             }
-                        }
-
-                        if self.blocks[index].pos.is_dragging && response.drag_stopped() {
-                            self.blocks[index].pos.is_dragging = false;
-
-                            let mut dropped_into_box = false;
-                            if !self.blocks[index].group.is_group {
-                                if let Some(m_pos) = input.interact_pos {
-                                    let world_mouse = (m_pos - canvas_origin) / zoom;
-                                    let target_idx = self.find_group_at_pos(
-                                        world_mouse.to_pos2(),
-                                        self.blocks[index].id,
-                                    );
-
-                                    if let Some(t_idx) = target_idx {
-                                        self.drop_block_into_box(index, t_idx);
-                                        dropped_into_box = true;
-                                        should_reflow = true;
-                                    }
-                                }
+                            if s_reflow {
+                                should_reflow = true;
                             }
-
-                            if dropped_into_box {
+                            if removed {
                                 continue;
                             }
-
-                            dropped_leader_id = Some(self.blocks[index].id);
                         }
 
                         let show_controls = is_hovering_block
@@ -1055,7 +961,11 @@ impl MaBlocksApp {
                             ));
                         }
 
-                        if input.primary_clicked && response.clicked() && !any_button_hovered {
+                        if !remove
+                            && input.primary_clicked
+                            && response.clicked()
+                            && !any_button_hovered
+                        {
                             if input.ctrl {
                                 self.toggle_chain_for_block(index);
                             } else if self.blocks[index].anim.has_animation {
@@ -1082,17 +992,11 @@ impl MaBlocksApp {
                         }
                     }
 
-                    for (id, rect, config) in dragging_blocks_to_render {
-                        if let Some(block) = self.blocks.iter().find(|b| b.id == id) {
-                            block.render(&mut canvas_ui, rect, config);
-                        }
-                    }
-                    if let Some((id, rect, mut config)) = hovered_box_to_render {
-                        if let Some(block) = self.blocks.iter().find(|b| b.id == id) {
-                            config.is_drop_target = true;
-                            block.render(&mut canvas_ui, rect, config);
-                        }
-                    }
+                    self.render_block_layer(
+                        &mut canvas_ui,
+                        &dragging_blocks_to_render,
+                        hovered_box_to_render,
+                    );
 
                     if !std::mem::take(&mut self.skip_chain_cancel) {
                         if input.primary_clicked {
@@ -1112,6 +1016,178 @@ impl MaBlocksApp {
         });
 
         (dropped_leader_id, should_reflow)
+    }
+
+    fn handle_zoom_input(&mut self, ui: &egui::Ui, input: &InputSnapshot) {
+        if input.zoom_delta != 1.0 {
+            self.zoom = (self.zoom * input.zoom_delta).clamp(0.1, 10.0);
+        }
+
+        let available_width = ui.available_width();
+        let mut target_inner_width = if available_width.is_finite() {
+            (available_width / self.zoom - CANVAS_PADDING * 2.0).max(MIN_CANVAS_INNER_WIDTH)
+        } else {
+            CANVAS_WORKING_WIDTH / self.zoom
+        };
+        if target_inner_width.is_nan() {
+            target_inner_width = CANVAS_WORKING_WIDTH / self.zoom;
+        }
+        if (target_inner_width - self.working_inner_width).abs() > 0.5 {
+            self.working_inner_width = target_inner_width;
+            self.reflow_blocks();
+        }
+    }
+
+    fn handle_block_interaction(
+        &mut self,
+        index: usize,
+        input: &InputSnapshot,
+        canvas_origin: Pos2,
+        zoom: f32,
+        hover_state: &BlockControlHover,
+        is_hovering_block: bool,
+    ) -> bool {
+        let mut skip_chain_cancel = false;
+        let any_button_hovered =
+            hover_state.close_hovered || hover_state.chain_hovered || hover_state.counter_hovered;
+
+        if input.primary_clicked {
+            if hover_state.chain_hovered {
+                self.toggle_chain_for_block(index);
+            } else if hover_state.counter_hovered {
+                self.blocks[index].counter += 1;
+                skip_chain_cancel = true;
+            }
+        }
+
+        if input.secondary_clicked && hover_state.counter_hovered {
+            self.blocks[index].counter = (self.blocks[index].counter - 1).max(0);
+            skip_chain_cancel = true;
+        }
+
+        if input.secondary_pressed && is_hovering_block && !any_button_hovered {
+            if let Some(m_pos) = input.hover_pos {
+                let world_mouse = (m_pos - canvas_origin) / zoom;
+                let center = self.blocks[index].rect().center();
+                let handle = match (world_mouse.x < center.x, world_mouse.y < center.y) {
+                    (true, true) => ResizeHandle::TopLeft,
+                    (false, true) => ResizeHandle::TopRight,
+                    (true, false) => ResizeHandle::BottomLeft,
+                    (false, false) => ResizeHandle::BottomRight,
+                };
+                self.resizing_state = Some(InteractionState {
+                    id: self.blocks[index].id,
+                    handle,
+                    initial_mouse_pos: m_pos,
+                    initial_block_rect: self.blocks[index].rect(),
+                });
+            }
+        }
+        skip_chain_cancel
+    }
+
+    fn process_block_drag(
+        &mut self,
+        index: usize,
+        response: &egui::Response,
+        canvas_origin: Pos2,
+        zoom: f32,
+        input: &InputSnapshot,
+        ui: &egui::Ui,
+    ) -> (Option<Uuid>, bool, bool) {
+        let mut dropped_leader_id = None;
+        let mut should_reflow = false;
+
+        if response.drag_started_by(egui::PointerButton::Primary) {
+            if let Some(pointer) = response.interact_pointer_pos() {
+                let block = &mut self.blocks[index];
+                block.pos.drag_offset = (pointer - canvas_origin) / zoom
+                    - vec2(block.pos.position.x, block.pos.position.y);
+                block.pos.is_dragging = true;
+            }
+        }
+
+        if self.blocks[index].pos.is_dragging && response.dragged_by(egui::PointerButton::Primary) {
+            if let Some(pointer) = response.interact_pointer_pos() {
+                let viewport = ui.clip_rect();
+                let mut scroll_delta = 0.0;
+                if pointer.y < viewport.min.y {
+                    scroll_delta = viewport.min.y - pointer.y;
+                } else if pointer.y > viewport.max.y {
+                    scroll_delta = viewport.max.y - pointer.y;
+                }
+
+                if scroll_delta != 0.0 {
+                    ui.scroll_with_delta(vec2(0.0, scroll_delta));
+                    ui.ctx().request_repaint();
+                }
+
+                let old_pos = self.blocks[index].pos.position;
+                let current_canvas_origin = canvas_origin + vec2(0.0, scroll_delta);
+                let new_pos =
+                    (pointer - current_canvas_origin) / zoom - self.blocks[index].pos.drag_offset;
+                let delta = pos2(new_pos.x, new_pos.y) - old_pos;
+
+                let is_chained = self.blocks[index].chained;
+                let leader_id = self.blocks[index].id;
+
+                self.blocks[index].pos.position = pos2(new_pos.x, new_pos.y);
+
+                if is_chained {
+                    for other in &mut self.blocks {
+                        if other.chained && other.id != leader_id {
+                            other.pos.position += delta;
+                        }
+                    }
+                }
+            }
+        }
+
+        if self.blocks[index].pos.is_dragging && response.drag_stopped() {
+            self.blocks[index].pos.is_dragging = false;
+
+            let mut dropped_into_box = false;
+            if !self.blocks[index].group.is_group {
+                if let Some(m_pos) = input.interact_pos {
+                    let world_mouse = (m_pos - canvas_origin) / zoom;
+                    let target_idx =
+                        self.find_group_at_pos(world_mouse.to_pos2(), self.blocks[index].id);
+
+                    if let Some(t_idx) = target_idx {
+                        self.drop_block_into_box(index, t_idx);
+                        dropped_into_box = true;
+                        should_reflow = true;
+                    }
+                }
+            }
+
+            if dropped_into_box {
+                return (None, true, true);
+            }
+
+            dropped_leader_id = Some(self.blocks[index].id);
+        }
+
+        (dropped_leader_id, should_reflow, false)
+    }
+
+    fn render_block_layer(
+        &self,
+        ui: &mut egui::Ui,
+        dragging_blocks: &[(Uuid, Rect, BlockRenderConfig)],
+        hovered_box: Option<(Uuid, Rect, BlockRenderConfig)>,
+    ) {
+        for (id, rect, config) in dragging_blocks {
+            if let Some(block) = self.blocks.iter().find(|b| b.id == *id) {
+                block.render(ui, *rect, *config);
+            }
+        }
+        if let Some((id, rect, mut config)) = hovered_box {
+            if let Some(block) = self.blocks.iter().find(|b| b.id == id) {
+                config.is_drop_target = true;
+                block.render(ui, rect, config);
+            }
+        }
     }
 
     fn save_session(&mut self) {
