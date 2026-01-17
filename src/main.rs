@@ -175,9 +175,9 @@ impl MaBlocksApp {
                             let path_str = path.to_string_lossy().into_owned();
                             for block in &mut self.blocks {
                                 if block.path == path_str && !block.is_full_sequence {
-                                    block.frames = std::mem::take(&mut loaded.frames);
+                                    block.anim.frames = std::mem::take(&mut loaded.frames);
                                     block.is_full_sequence = true;
-                                    block.animation_enabled = true;
+                                    block.anim.animation_enabled = true;
                                     update_id = Some(block.id);
                                     break;
                                 }
@@ -231,8 +231,8 @@ impl MaBlocksApp {
 
     fn purge_animation_frames(&mut self, id: Uuid) {
         if let Some(block) = self.blocks.iter_mut().find(|b| b.id == id) {
-            if block.is_full_sequence && block.frames.len() > 1 {
-                block.frames.truncate(1);
+            if block.is_full_sequence && block.anim.frames.len() > 1 {
+                block.anim.frames.truncate(1);
                 block.is_full_sequence = false;
                 block.stop_animation();
             }
@@ -270,7 +270,7 @@ impl MaBlocksApp {
             loaded.has_animation,
             is_full,
         );
-        block.position = pos2(CANVAS_PADDING, CANVAS_PADDING);
+        block.pos.position = pos2(CANVAS_PADDING, CANVAS_PADDING);
         Ok(block)
     }
 
@@ -330,13 +330,13 @@ impl MaBlocksApp {
 
         for block in &mut self.blocks {
             if let Some(prev) = prev_is_group {
-                if prev != block.is_group && cursor.x > CANVAS_PADDING {
+                if prev != block.group.is_group && cursor.x > CANVAS_PADDING {
                     cursor.x = CANVAS_PADDING;
                     cursor.y += row_height + ALIGN_SPACING;
                     row_height = 0.0;
                 }
             }
-            prev_is_group = Some(block.is_group);
+            prev_is_group = Some(block.group.is_group);
 
             let size = block.outer_size();
             if cursor.x + size.x > row_limit {
@@ -345,7 +345,7 @@ impl MaBlocksApp {
                 row_height = 0.0;
             }
 
-            block.position = pos2(cursor.x, cursor.y);
+            block.pos.position = pos2(cursor.x, cursor.y);
             cursor.x += size.x + ALIGN_SPACING;
             row_height = row_height.max(size.y);
         }
@@ -354,7 +354,7 @@ impl MaBlocksApp {
     fn get_max_block_height(&self) -> f32 {
         self.blocks
             .iter()
-            .filter(|b| !b.is_group)
+            .filter(|b| !b.group.is_group)
             .map(|b| b.preferred_image_size.y)
             .fold(0.0, |a, b| a.max(b))
     }
@@ -390,7 +390,7 @@ impl MaBlocksApp {
     }
 
     fn toggle_chain_for_block(&mut self, index: usize) {
-        if !self.can_chain() && !self.blocks[index].is_group {
+        if !self.can_chain() && !self.blocks[index].group.is_group {
             return;
         }
 
@@ -439,8 +439,8 @@ impl MaBlocksApp {
         let mut min_pos = pos2(f32::MAX, f32::MAX);
         for &idx in &chained_indices {
             let block = self.blocks.remove(idx);
-            min_pos.x = min_pos.x.min(block.position.x);
-            min_pos.y = min_pos.y.min(block.position.y);
+            min_pos.x = min_pos.x.min(block.pos.position.x);
+            min_pos.y = min_pos.y.min(block.pos.position.y);
             children.push(block);
         }
         children.reverse();
@@ -457,7 +457,7 @@ impl MaBlocksApp {
         let mut group_block =
             ImageBlock::new_group(String::new(), children, texture, representative_texture);
         group_block.update_group_name();
-        group_block.position = min_pos;
+        group_block.pos.position = min_pos;
         let new_id = group_block.id;
         self.blocks.insert(0, group_block);
         self.reflow_blocks();
@@ -466,13 +466,13 @@ impl MaBlocksApp {
 
     fn unbox_group(&mut self, index: usize) {
         let group = self.blocks.remove(index);
-        if group.is_group {
+        if group.group.is_group {
             let insert_idx = self
                 .blocks
                 .iter()
-                .position(|b| !b.is_group)
+                .position(|b| !b.group.is_group)
                 .unwrap_or(self.blocks.len());
-            for (i, mut child) in group.children.into_iter().enumerate() {
+            for (i, mut child) in group.group.children.into_iter().enumerate() {
                 child.chained = false;
                 self.blocks.insert(insert_idx + i, child);
             }
@@ -505,7 +505,7 @@ impl MaBlocksApp {
 
     fn move_single_block_into_box(&mut self, block_idx: usize, box_idx: usize) {
         let mut block = self.blocks.remove(block_idx);
-        block.is_dragging = false;
+        block.pos.is_dragging = false;
         block.chained = false;
 
         let target_box_idx = if box_idx > block_idx {
@@ -515,11 +515,11 @@ impl MaBlocksApp {
         };
         let box_block = &mut self.blocks[target_box_idx];
 
-        if box_block.representative_texture.is_none() {
-            box_block.representative_texture = Some(block.texture.clone());
+        if box_block.group.representative_texture.is_none() {
+            box_block.group.representative_texture = Some(block.texture.clone());
         }
 
-        box_block.children.push(block);
+        box_block.group.children.push(block);
         box_block.update_group_name();
     }
 
@@ -542,8 +542,12 @@ impl MaBlocksApp {
                 }
             } else if let Some(last_id) = self.last_boxed_id {
                 if let Some(idx) = self.blocks.iter().position(|b| b.id == last_id) {
-                    self.last_unboxed_ids =
-                        self.blocks[idx].children.iter().map(|c| c.id).collect();
+                    self.last_unboxed_ids = self.blocks[idx]
+                        .group
+                        .children
+                        .iter()
+                        .map(|c| c.id)
+                        .collect();
                     self.unbox_group(idx);
                     self.last_boxed_id = None;
                     return;
@@ -553,9 +557,14 @@ impl MaBlocksApp {
 
         let chained: Vec<&ImageBlock> = self.blocks.iter().filter(|b| b.chained).collect();
 
-        if chained.len() == 1 && chained[0].is_group {
+        if chained.len() == 1 && chained[0].group.is_group {
             let idx = self.blocks.iter().position(|b| b.chained).unwrap();
-            self.last_unboxed_ids = self.blocks[idx].children.iter().map(|c| c.id).collect();
+            self.last_unboxed_ids = self.blocks[idx]
+                .group
+                .children
+                .iter()
+                .map(|c| c.id)
+                .collect();
             self.unbox_group(idx);
             self.last_boxed_id = None;
         } else if !chained.is_empty() {
@@ -613,22 +622,25 @@ impl MaBlocksApp {
                 .iter()
                 .find(|b| b.id == leader_id)
                 .unwrap()
+                .pos
                 .position;
-            let is_leader_group = moved_group[0].is_group;
+            let is_leader_group = moved_group[0].group.is_group;
 
             let group_boundary = remaining
                 .iter()
-                .position(|b| !b.is_group)
+                .position(|b| !b.group.is_group)
                 .unwrap_or(remaining.len());
 
             let mut insert_idx;
             if is_leader_group {
                 insert_idx = group_boundary;
                 for (i, b) in remaining[..group_boundary].iter().enumerate() {
-                    let b_y_q = (b.position.y / ROW_QUANTIZATION_HEIGHT) as i32;
+                    let b_y_q = (b.pos.position.y / ROW_QUANTIZATION_HEIGHT) as i32;
                     let leader_y_q = (leader_pos.y / ROW_QUANTIZATION_HEIGHT) as i32;
 
-                    if leader_y_q < b_y_q || (leader_y_q == b_y_q && leader_pos.x < b.position.x) {
+                    if leader_y_q < b_y_q
+                        || (leader_y_q == b_y_q && leader_pos.x < b.pos.position.x)
+                    {
                         insert_idx = i;
                         break;
                     }
@@ -636,10 +648,12 @@ impl MaBlocksApp {
             } else {
                 insert_idx = remaining.len();
                 for (i, b) in remaining[group_boundary..].iter().enumerate() {
-                    let b_y_q = (b.position.y / ROW_QUANTIZATION_HEIGHT) as i32;
+                    let b_y_q = (b.pos.position.y / ROW_QUANTIZATION_HEIGHT) as i32;
                     let leader_y_q = (leader_pos.y / ROW_QUANTIZATION_HEIGHT) as i32;
 
-                    if leader_y_q < b_y_q || (leader_y_q == b_y_q && leader_pos.x < b.position.x) {
+                    if leader_y_q < b_y_q
+                        || (leader_y_q == b_y_q && leader_pos.x < b.pos.position.x)
+                    {
                         insert_idx = group_boundary + i;
                         break;
                     }
@@ -810,7 +824,7 @@ impl MaBlocksApp {
                     let content_height = self
                         .blocks
                         .iter()
-                        .map(|b| b.position.y + b.outer_size().y)
+                        .map(|b| b.pos.position.y + b.outer_size().y)
                         .fold(0.0, |a: f32, b| a.max(b));
                     let min_height = ui.available_height() / zoom;
                     let canvas_height = (content_height + CANVAS_PADDING).max(min_height);
@@ -829,8 +843,8 @@ impl MaBlocksApp {
                     let canvas_origin = canvas_rect.min;
 
                     self.hovered_box_id = None;
-                    if let Some(dragging_idx) = self.blocks.iter().position(|b| b.is_dragging) {
-                        if !self.blocks[dragging_idx].is_group {
+                    if let Some(dragging_idx) = self.blocks.iter().position(|b| b.pos.is_dragging) {
+                        if !self.blocks[dragging_idx].group.is_group {
                             if let Some(m_pos) = ui.input(|i| i.pointer.interact_pos()) {
                                 let world_mouse = (m_pos - canvas_origin) / zoom;
                                 if let Some(target_idx) = self.find_group_at_pos(
@@ -849,7 +863,7 @@ impl MaBlocksApp {
 
                     while index < self.blocks.len() {
                         let block_rect = Rect::from_min_size(
-                            self.blocks[index].position * zoom,
+                            self.blocks[index].pos.position * zoom,
                             self.blocks[index].outer_size() * zoom,
                         )
                         .translate(canvas_origin.to_vec2());
@@ -865,7 +879,7 @@ impl MaBlocksApp {
                         let hover_state = BlockControlHover {
                             close_hovered: mouse_pos.is_some_and(|p| close_rect.contains(p)),
                             chain_hovered: mouse_pos.is_some_and(|p| chain_rect.contains(p)),
-                            counter_hovered: !block.is_group
+                            counter_hovered: !block.group.is_group
                                 && mouse_pos.is_some_and(|p| counter_rect.contains(p)),
                         };
 
@@ -924,13 +938,13 @@ impl MaBlocksApp {
                         {
                             if let Some(pointer) = response.interact_pointer_pos() {
                                 let block = &mut self.blocks[index];
-                                block.drag_offset = (pointer - canvas_origin) / zoom
-                                    - vec2(block.position.x, block.position.y);
-                                block.is_dragging = true;
+                                block.pos.drag_offset = (pointer - canvas_origin) / zoom
+                                    - vec2(block.pos.position.x, block.pos.position.y);
+                                block.pos.is_dragging = true;
                             }
                         }
 
-                        if self.blocks[index].is_dragging
+                        if self.blocks[index].pos.is_dragging
                             && response.dragged_by(egui::PointerButton::Primary)
                         {
                             if let Some(pointer) = response.interact_pointer_pos() {
@@ -947,32 +961,32 @@ impl MaBlocksApp {
                                     ui.ctx().request_repaint();
                                 }
 
-                                let old_pos = self.blocks[index].position;
+                                let old_pos = self.blocks[index].pos.position;
                                 let current_canvas_origin = canvas_origin + vec2(0.0, scroll_delta);
                                 let new_pos = (pointer - current_canvas_origin) / zoom
-                                    - self.blocks[index].drag_offset;
+                                    - self.blocks[index].pos.drag_offset;
                                 let delta = pos2(new_pos.x, new_pos.y) - old_pos;
 
                                 let is_chained = self.blocks[index].chained;
                                 let leader_id = self.blocks[index].id;
 
-                                self.blocks[index].position = pos2(new_pos.x, new_pos.y);
+                                self.blocks[index].pos.position = pos2(new_pos.x, new_pos.y);
 
                                 if is_chained {
                                     for other in &mut self.blocks {
                                         if other.chained && other.id != leader_id {
-                                            other.position += delta;
+                                            other.pos.position += delta;
                                         }
                                     }
                                 }
                             }
                         }
 
-                        if self.blocks[index].is_dragging && response.drag_stopped() {
-                            self.blocks[index].is_dragging = false;
+                        if self.blocks[index].pos.is_dragging && response.drag_stopped() {
+                            self.blocks[index].pos.is_dragging = false;
 
                             let mut dropped_into_box = false;
-                            if !self.blocks[index].is_group {
+                            if !self.blocks[index].group.is_group {
                                 if let Some(m_pos) = ui.input(|i| i.pointer.interact_pos()) {
                                     let world_mouse = (m_pos - canvas_origin) / zoom;
                                     let target_idx = self.find_group_at_pos(
@@ -996,13 +1010,13 @@ impl MaBlocksApp {
                         }
 
                         let show_controls = is_hovering_block
-                            || self.blocks[index].is_dragging
+                            || self.blocks[index].pos.is_dragging
                             || self.blocks[index].chained;
 
-                        let is_any_dragging = self.blocks.iter().any(|b| b.is_dragging);
+                        let is_any_dragging = self.blocks.iter().any(|b| b.pos.is_dragging);
                         let is_hovered_box = Some(self.blocks[index].id) == self.hovered_box_id;
                         let should_render_on_top = is_hovered_box
-                            || self.blocks[index].is_dragging
+                            || self.blocks[index].pos.is_dragging
                             || (is_any_dragging && self.blocks[index].chained);
 
                         let config = BlockRenderConfig {
@@ -1021,7 +1035,7 @@ impl MaBlocksApp {
                         if is_hovered_box {
                             hovered_box_to_render =
                                 Some((self.blocks[index].id, block_rect, config));
-                        } else if self.blocks[index].is_dragging
+                        } else if self.blocks[index].pos.is_dragging
                             || (is_any_dragging && self.blocks[index].chained)
                         {
                             dragging_blocks_to_render.push((
@@ -1034,13 +1048,13 @@ impl MaBlocksApp {
                         if primary_clicked && response.clicked() && !any_button_hovered {
                             if ui.input(|i| i.modifiers.ctrl) {
                                 self.toggle_chain_for_block(index);
-                            } else if self.blocks[index].has_animation {
+                            } else if self.blocks[index].anim.has_animation {
                                 if !self.blocks[index].is_full_sequence {
                                     let path = PathBuf::from(&self.blocks[index].path);
                                     self.trigger_image_load(path, false);
                                 } else {
                                     self.blocks[index].toggle_animation();
-                                    if self.blocks[index].animation_enabled {
+                                    if self.blocks[index].anim.animation_enabled {
                                         let id = self.blocks[index].id;
                                         self.mark_animation_used(id);
                                     }
@@ -1119,16 +1133,21 @@ impl MaBlocksApp {
     fn block_to_data(&self, b: &ImageBlock) -> BlockData {
         BlockData {
             id: b.id,
-            position: [b.position.x, b.position.y],
+            position: [b.pos.position.x, b.pos.position.y],
             size: [b.image_size.x, b.image_size.y],
             path: b.path.clone(),
             chained: b.chained,
-            animation_enabled: b.animation_enabled,
+            animation_enabled: b.anim.animation_enabled,
             counter: b.counter,
-            is_group: b.is_group,
-            group_name: b.group_name.clone(),
+            is_group: b.group.is_group,
+            group_name: b.group.group_name.clone(),
             color: b.color.to_array(),
-            children: b.children.iter().map(|c| self.block_to_data(c)).collect(),
+            children: b
+                .group
+                .children
+                .iter()
+                .map(|c| self.block_to_data(c))
+                .collect(),
         }
     }
 
@@ -1158,7 +1177,7 @@ impl MaBlocksApp {
                 data.color[2],
                 data.color[3],
             );
-            group.position = pos2(data.position[0], data.position[1]);
+            group.pos.position = pos2(data.position[0], data.position[1]);
             group.set_preferred_size(vec2(data.size[0], data.size[1]));
             group.chained = data.chained;
             Some(group)
@@ -1182,12 +1201,12 @@ impl MaBlocksApp {
                             data.color[2],
                             data.color[3],
                         );
-                        block.position = pos2(data.position[0], data.position[1]);
+                        block.pos.position = pos2(data.position[0], data.position[1]);
                         block.set_preferred_size(vec2(data.size[0], data.size[1]));
                         block.chained = data.chained;
                         block.counter = data.counter;
-                        if data.animation_enabled && block.frames.len() > 1 {
-                            block.animation_enabled = true;
+                        if data.animation_enabled && block.anim.frames.len() > 1 {
+                            block.anim.animation_enabled = true;
                         }
                         return Some(block);
                     }
@@ -1242,7 +1261,7 @@ impl MaBlocksApp {
     fn find_group_at_pos(&self, pos: Pos2, exclude_id: Uuid) -> Option<usize> {
         self.blocks
             .iter()
-            .position(|b| b.id != exclude_id && b.is_group && b.rect().contains(pos))
+            .position(|b| b.id != exclude_id && b.group.is_group && b.rect().contains(pos))
     }
 }
 

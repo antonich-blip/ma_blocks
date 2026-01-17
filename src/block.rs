@@ -29,6 +29,30 @@ pub struct InteractionState {
     pub initial_block_rect: Rect,
 }
 
+/// Manages the spatial properties and dragging state of a block.
+pub struct BlockPosition {
+    pub position: Pos2,
+    pub drag_offset: Vec2,
+    pub is_dragging: bool,
+}
+
+/// Manages the animation sequence and playback state for a block.
+pub struct AnimationState {
+    pub frames: Vec<AnimationFrame>,
+    pub current_frame: usize,
+    pub frame_elapsed: Duration,
+    pub animation_enabled: bool,
+    pub has_animation: bool,
+}
+
+/// Manages group-related data when multiple blocks are combined.
+pub struct GroupData {
+    pub is_group: bool,
+    pub group_name: String,
+    pub children: Vec<ImageBlock>,
+    pub representative_texture: Option<egui::TextureHandle>,
+}
+
 /// Tracks which control elements of a block are currently hovered by the pointer.
 #[derive(Default, Clone, Copy)]
 pub struct BlockControlHover {
@@ -70,24 +94,15 @@ pub struct ImageBlock {
     pub id: Uuid,
     pub path: String,
     pub texture: egui::TextureHandle,
-    pub frames: Vec<AnimationFrame>,
-    pub current_frame: usize,
-    pub frame_elapsed: Duration,
-    pub animation_enabled: bool,
-    pub position: Pos2,
-    pub drag_offset: Vec2,
-    pub is_dragging: bool,
+    pub pos: BlockPosition,
+    pub anim: AnimationState,
+    pub group: GroupData,
     pub image_size: Vec2,
     pub preferred_image_size: Vec2,
     pub aspect_ratio: f32,
     pub color: egui::Color32,
     pub chained: bool,
     pub counter: i32,
-    pub is_group: bool,
-    pub group_name: String,
-    pub children: Vec<ImageBlock>,
-    pub representative_texture: Option<egui::TextureHandle>,
-    pub has_animation: bool,
     pub is_full_sequence: bool,
 }
 
@@ -122,24 +137,30 @@ impl ImageBlock {
             id,
             path,
             texture,
-            frames,
-            current_frame: 0,
-            frame_elapsed: Duration::ZERO,
-            animation_enabled: false,
-            position: egui::pos2(0.0, 0.0),
-            drag_offset: Vec2::ZERO,
-            is_dragging: false,
+            pos: BlockPosition {
+                position: egui::pos2(0.0, 0.0),
+                drag_offset: Vec2::ZERO,
+                is_dragging: false,
+            },
+            anim: AnimationState {
+                frames,
+                current_frame: 0,
+                frame_elapsed: Duration::ZERO,
+                animation_enabled: false,
+                has_animation,
+            },
+            group: GroupData {
+                is_group: false,
+                group_name: String::new(),
+                children: Vec::new(),
+                representative_texture: None,
+            },
             image_size,
             preferred_image_size: image_size,
             aspect_ratio,
             color,
             chained: false,
             counter: 0,
-            is_group: false,
-            group_name: String::new(),
-            children: Vec::new(),
-            representative_texture: None,
-            has_animation,
             is_full_sequence,
         }
     }
@@ -157,30 +178,36 @@ impl ImageBlock {
             id,
             path: String::new(),
             texture,
-            frames: Vec::new(),
-            current_frame: 0,
-            frame_elapsed: Duration::ZERO,
-            animation_enabled: false,
-            position: egui::pos2(0.0, 0.0),
-            drag_offset: Vec2::ZERO,
-            is_dragging: false,
+            pos: BlockPosition {
+                position: egui::pos2(0.0, 0.0),
+                drag_offset: Vec2::ZERO,
+                is_dragging: false,
+            },
+            anim: AnimationState {
+                frames: Vec::new(),
+                current_frame: 0,
+                frame_elapsed: Duration::ZERO,
+                animation_enabled: false,
+                has_animation: false,
+            },
+            group: GroupData {
+                is_group: true,
+                group_name: name,
+                children,
+                representative_texture,
+            },
             image_size,
             preferred_image_size: image_size,
             aspect_ratio: 1.0,
             color,
             chained: false,
             counter: 0,
-            is_group: true,
-            group_name: name,
-            children,
-            representative_texture,
-            has_animation: false,
             is_full_sequence: true,
         }
     }
 
     pub fn rect(&self) -> Rect {
-        Rect::from_min_size(self.position, self.outer_size())
+        Rect::from_min_size(self.pos.position, self.outer_size())
     }
 
     pub fn outer_size(&self) -> Vec2 {
@@ -210,16 +237,16 @@ impl ImageBlock {
     }
 
     pub fn update_animation(&mut self, dt: f32) -> bool {
-        if !self.animation_enabled || self.frames.len() <= 1 {
+        if !self.anim.animation_enabled || self.anim.frames.len() <= 1 {
             return false;
         }
 
-        self.frame_elapsed += Duration::from_secs_f32(dt.max(0.0));
+        self.anim.frame_elapsed += Duration::from_secs_f32(dt.max(0.0));
         let mut updated = false;
-        while self.frame_elapsed >= self.frames[self.current_frame].duration {
-            self.frame_elapsed -= self.frames[self.current_frame].duration;
-            self.current_frame = (self.current_frame + 1) % self.frames.len();
-            let frame_image = self.frames[self.current_frame].image.clone();
+        while self.anim.frame_elapsed >= self.anim.frames[self.anim.current_frame].duration {
+            self.anim.frame_elapsed -= self.anim.frames[self.anim.current_frame].duration;
+            self.anim.current_frame = (self.anim.current_frame + 1) % self.anim.frames.len();
+            let frame_image = self.anim.frames[self.anim.current_frame].image.clone();
             self.texture.set(frame_image, egui::TextureOptions::LINEAR);
             updated = true;
         }
@@ -227,12 +254,12 @@ impl ImageBlock {
     }
 
     pub fn time_until_next_frame(&self) -> Option<Duration> {
-        if !self.animation_enabled || self.frames.len() <= 1 {
+        if !self.anim.animation_enabled || self.anim.frames.len() <= 1 {
             return None;
         }
 
-        let frame_duration = self.frames[self.current_frame].duration;
-        let remaining = frame_duration.saturating_sub(self.frame_elapsed);
+        let frame_duration = self.anim.frames[self.anim.current_frame].duration;
+        let remaining = frame_duration.saturating_sub(self.anim.frame_elapsed);
         if remaining.is_zero() {
             Some(Duration::from_millis(1))
         } else {
@@ -241,20 +268,20 @@ impl ImageBlock {
     }
 
     pub fn toggle_animation(&mut self) {
-        if self.frames.len() <= 1 {
+        if self.anim.frames.len() <= 1 {
             return;
         }
-        self.animation_enabled = !self.animation_enabled;
-        if !self.animation_enabled {
+        self.anim.animation_enabled = !self.anim.animation_enabled;
+        if !self.anim.animation_enabled {
             self.stop_animation();
         }
     }
 
     pub fn stop_animation(&mut self) {
-        self.animation_enabled = false;
-        self.current_frame = 0;
-        self.frame_elapsed = Duration::ZERO;
-        if let Some(first) = self.frames.first() {
+        self.anim.animation_enabled = false;
+        self.anim.current_frame = 0;
+        self.anim.frame_elapsed = Duration::ZERO;
+        if let Some(first) = self.anim.frames.first() {
             self.texture
                 .set(first.image.clone(), egui::TextureOptions::LINEAR);
         }
@@ -262,23 +289,24 @@ impl ImageBlock {
 
     pub fn reset_counters_recursive(&mut self) {
         self.counter = 0;
-        for child in &mut self.children {
+        for child in &mut self.group.children {
             child.reset_counters_recursive();
         }
     }
 
     pub fn cmp_layout(&self, other: &Self) -> Ordering {
-        match (self.is_group, other.is_group) {
+        match (self.group.is_group, other.group.is_group) {
             (true, false) => Ordering::Less,
             (false, true) => Ordering::Greater,
             _ => {
-                let a_y_q = (self.position.y / ROW_QUANTIZATION_HEIGHT) as i32;
-                let b_y_q = (other.position.y / ROW_QUANTIZATION_HEIGHT) as i32;
+                let a_y_q = (self.pos.position.y / ROW_QUANTIZATION_HEIGHT) as i32;
+                let b_y_q = (other.pos.position.y / ROW_QUANTIZATION_HEIGHT) as i32;
                 match a_y_q.cmp(&b_y_q) {
                     Ordering::Equal => self
+                        .pos
                         .position
                         .x
-                        .partial_cmp(&other.position.x)
+                        .partial_cmp(&other.pos.position.x)
                         .unwrap_or(Ordering::Equal),
                     ord => ord,
                 }
@@ -287,15 +315,15 @@ impl ImageBlock {
     }
 
     pub fn update_group_name(&mut self) {
-        if !self.is_group {
+        if !self.group.is_group {
             return;
         }
-        self.group_name = if self.children.len() > 1 {
-            format!("Group of {}", self.children.len())
-        } else if self.children.len() == 1 {
+        self.group.group_name = if self.group.children.len() > 1 {
+            format!("Group of {}", self.group.children.len())
+        } else if self.group.children.len() == 1 {
             format!(
                 "Box: {}",
-                Path::new(&self.children[0].path)
+                Path::new(&self.group.children[0].path)
                     .file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or("unnamed")
@@ -318,7 +346,7 @@ impl ImageBlock {
 
         let rounding = egui::Rounding::same(6.0 * config.zoom);
 
-        if self.is_group {
+        if self.group.is_group {
             let fill_color = if self.chained || config.is_drop_target {
                 Color32::from_rgb(100, 100, 150)
             } else {
@@ -341,7 +369,7 @@ impl ImageBlock {
                 self.color,
             );
 
-            if let Some(rep_texture) = &self.representative_texture {
+            if let Some(rep_texture) = &self.group.representative_texture {
                 let tag_size = image_rect.size() * 0.8;
                 let tag_rect = Rect::from_center_size(image_rect.center(), tag_size);
                 let mut tag_shape = egui::epaint::RectShape::filled(
@@ -400,7 +428,7 @@ impl ImageBlock {
                 Color32::WHITE,
             );
 
-            if !self.is_group {
+            if !self.group.is_group {
                 painter.circle_filled(
                     counter_rect.center(),
                     btn_size / 2.0,
@@ -420,7 +448,7 @@ impl ImageBlock {
             }
         }
 
-        if !self.is_group && self.counter > 0 {
+        if !self.group.is_group && self.counter > 0 {
             let circle_radius = 15.0 * config.zoom;
             let circle_center = pos2(
                 rect.min.x + circle_radius + 5.0 * config.zoom,
@@ -441,8 +469,8 @@ impl ImageBlock {
         }
 
         if config.show_file_names {
-            let name = if self.is_group {
-                &self.group_name
+            let name = if self.group.is_group {
+                &self.group.group_name
             } else {
                 Path::new(&self.path)
                     .file_name()
@@ -516,7 +544,7 @@ pub fn handle_blocks_resizing(
         let new_outer_size = new_size + Vec2::splat(BLOCK_PADDING * 2.0);
         let new_rect = Rect::from_center_size(original_center, new_outer_size);
 
-        blocks[idx].position = new_rect.min;
+        blocks[idx].pos.position = new_rect.min;
         blocks[idx].set_preferred_size(new_size);
 
         if blocks[idx].chained {
@@ -533,7 +561,7 @@ pub fn handle_blocks_resizing(
                         let chained_rect =
                             Rect::from_center_size(original_center, chained_outer_size);
 
-                        blocks[i].position = chained_rect.min;
+                        blocks[i].pos.position = chained_rect.min;
                         blocks[i].set_preferred_size(chained_size);
                     }
                 }
