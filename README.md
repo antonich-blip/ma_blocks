@@ -1,6 +1,20 @@
-## Compilation and Running
+# MaBlocks2
 
-This app supports Linux (Wayland/X11) and macOS.
+A whiteboard-style desktop application for organizing and managing images on an infinite canvas. Built with Rust using the `eframe`/`egui` framework.
+
+**Key Features:**
+- Drag-and-drop image organization with automatic row-based layout
+- Support for PNG, JPG, GIF, WebP, and AVIF (including animations)
+- Block chaining for grouping related images
+- Box containers for organizing groups
+- Session save/load for persistent workspaces
+- Efficient memory management with async loading and LRU caching
+
+**Supported Platforms:** Linux (Wayland/X11), macOS
+
+---
+
+## Installation
 
 ### Prerequisites
 
@@ -31,7 +45,31 @@ cargo run
 # Build release binary
 cargo build --release
 ```
-The runnable binary will be located at `target/release/ma_blocks2`.
+The release binary will be located at `target/release/ma_blocks2`.
+
+---
+
+## Usage
+
+### Controls
+
+| Action | Input |
+|--------|-------|
+| Move blocks | LMB + Drag |
+| Resize symmetrically | RMB + Drag |
+| Pan canvas | MMB + Drag |
+| Zoom | Ctrl + Scroll |
+| Vertical scroll | Mouse Scroll |
+| Toggle animation | LMB Click on image |
+| Toggle chaining | 'o' button or Ctrl+Click |
+
+### Toolbar Actions
+
+- **Save Session** - Save current canvas state to JSON
+- **Load Session** - Restore a previous session
+- **Add Image** - Bulk load images
+- **Reset Counters** - Reset all block counters to zero
+- **Compact/Unbox** - Pack chained blocks into a Box or unpack
 
 ### Wayland Support (Linux)
 The app is configured to support Wayland. If you encounter issues, you can force Wayland or X11 using environment variables:
@@ -53,90 +91,57 @@ MaBlocks2 is designed to handle a large number of images efficiently:
     - **Downsampling:** Large images are automatically downsampled during loading to fit within reasonable dimensions, significantly reducing VRAM and RAM usage.
     - **Frame Limits:** Animation sequences are limited to a maximum of 1024 frames to prevent excessive memory consumption from long or high-fps animations.
     - **Animation Cache (LRU Purging):** To prevent GPU/RAM overload from many active animations, only the 20 most recently played animations are kept in memory. Older animations are automatically purged (reverting to their first frame) and will be reloaded on demand if played again.
+- **Auto-Height Matching:** Newly added images automatically scale to match the tallest existing block, maintaining a uniform layout.
 
+---
 
-## Feature to adjust the height of newly added image blocks to match the tallest block on the canvas. 
+## Features
 
-Here's a summary of the changes:
-1.  Added get_max_block_height: A helper method in MaBlocksApp to find the height of the tallest block currently on the canvas.
-2.  Updated insert_loaded_image: Modified the return type to return the Uuid of the newly created block, allowing the caller to identify it.
-3.  Enhanced poll_image_rx: When images are loaded (either singly or in bulk), the app now:
-    *   Collects the IDs of all newly inserted blocks.
-    *   Calculates the maximum height among all blocks on the canvas (including the new ones).
-    *   Adjusts the preferred_image_size of each new block to match this maximum height while preserving its original aspect ratio.
-    *   Triggers a reflow to apply these changes.
-This ensures that whenever you add new images, they will automatically scale to match the tallest existing block (or each other, if they are taller than what's already there), maintaining a uniform and organized layout.
+### Canvas
 
-Technical Details:
-- The adjustment happens after a batch of images is received from the loader, ensuring that "bulk" additions are uniform even if they arrive at slightly different times.
-- The logic uses set_preferred_size, so the adjusted height persists through layout reflows and window resizing.
-- Existing blocks that were not part of the current addition are not modified, respecting any manual resizing you might have performed.
-- Loading a session does not trigger this adjustment, preserving the saved sizes of your blocks.
+- Unlimited vertical scrolling and 2D panning
+- Dynamic horizontal width that reflows content based on window size or zoom level
+- Zoom support affecting all canvas elements and layout
 
-## User Requirements
+### Blocks
 
-1. **Platform:** Whiteboard-type GUI desktop app for Linux (Wayland/X11) and macOS, written in Rust using `eframe`/`egui`.
-2. **Canvas:** 
-    *   Unlimited vertical scrolling and 2D panning (MMB + Drag).
-    *   Dynamic horizontal width that reflows content based on window size or zoom level.
-    *   Zoom support (Ctrl + Scroll) affecting all canvas elements and layout.
-3. **Toolbar:** Positioned at the top with actions for:
-    *   💾 Save Session: Saves current blocks and their states to a JSON file.
-    *   📂 Load Session: Restores a previous session from a JSON file.
-    *   🖼 Add Image: Bulk load images (PNG, JPG, GIF, WebP, AVIF).
-    *   🔄 Reset Counters: Resets all block counters to zero.
-    *   📦 Compact/Unbox: Stateful toggle that packs chained blocks into a single "Box" block or unpacks a selected box. Remembers the last group unboxed for easy re-boxing if no new selection is made.
-4. **Block Support:** 
-    *   Currently supports Image blocks with full transparency and animation support (GIF, animated WebP, animated AVIF).
-    *   **Box Blocks:** Specialized blocks that contain other blocks.
-    *   box blocks (groups) occupy the top lines of the canvas and do not share those lines with other block types.
-    *   Images spawn with original aspect ratio and maintain it during all operations.
-5. **Alignment & Layout:** 
-    *   Automatic row-based reflow logic with wrapping (similar to text).
-    *   Blocks are automatically reordered and reflowed after manual repositioning (drag stop) to maintain a clean grid.
-    After block (or a group of chained blocks) is dropped, it is treated as a single unit. The entire group is extracted from the block list, preserving its internal relative order, and then inserted into the new position as a continuous sequence
-6. **Resizing:**
-    *   Symmetrical resizing around the block's center using RMB + Drag.
-    *   Real-time synchronization with mouse movement.
-    *   Minimum size constraints to prevent UI artifacts.
-7. **Chaining (Grouping):**
-    *   Toggle 'chain' mode for individual blocks via the 'o' button or Ctrl+Click.
-    *   Chained blocks move together when any member of the group is dragged.
-    *   **Uniform Height:** Chained blocks maintain a synchronized height during resizing while preserving their individual aspect ratios.
-    *   Chaining is cancelled by clicking on the empty canvas.
-    *   **Remembered Chains:** When a chain of 2+ blocks is cleared, it is automatically remembered. Selecting any member of a previously chained group will auto-select all other members of that group. This feature is session-persistent.
-8. **Boxing & Containers:**
-    *   Chained blocks can be packed into a "Box" block using the 📦 toolbar button.
-    *   **Drag-to-Box:** Single blocks can be dragged and dropped directly into a "Box" block to add them to the container.
-    *   Boxing an existing "Box" block is not permitted (no nested containers).
-    *   Unboxing restores all contained blocks to the main canvas.
-    *   **Smart Toggle:** The 📦 toolbar button acts as a toggle. If no blocks are selected, clicking it will either re-box the most recently unboxed group or unbox the most recently created group, allowing for quick "previewing" of unboxed content.
-9. **Counter Feature:**
-    *   Each normal block has an optional counter (visible when > 0).
-    *   Interact via the '#' button: LMB click to increment, RMB click to decrement (normal blocks only).
-10. **Controls & Mappings:**
-    *   **LMB + Drag:** Move blocks (triggers reflow on release or drop into box).
-    *   **RMB + Drag:** Resize block(s) symmetrically.
-    *   **MMB + Drag:** Pan the canvas.
-    *   **Ctrl + Scroll:** Zoom in/out.
-    *   **Mouse Scroll:** Vertical scrolling.
-    *   **LMB Click (Image):** Toggle animation for supported formats.
-11. **Block UI (Hover/Interaction):**
-    *   'x': Delete/Close block.
-    *   'o': Toggle chaining.
-    *   '#': Increment/Decrement counter (normal blocks only).
+- **Image Blocks:** Support for PNG, JPG, GIF, WebP, and AVIF with full transparency and animation
+- **Box Blocks:** Container blocks that hold groups of other blocks (displayed at the top of the canvas)
+- All blocks maintain their aspect ratio during operations
 
-## ToDos
-- [x]  proper realignment with keeping order on  drag + drop of a group of blocks
-- [x]  make 'reset' button to reset counter bubbles inside boxes too
-- [x]  remember  group/'chain'. selecting one of the remembered member triggers auto selecting other members (this feature is session persistent)
-- [x]  drop group of blocks into a box with proper visual effects
-- [x]  remove 'counter' button from 'box' blocks UI
-- [x]  edge case with moving boxes
-- [x]  default images/sessions folder
-- [ ]  sound options
-- [ ]  text over blocks options
-- [ ]  Windows support
-- [ ]  Mobile support
+### Layout & Alignment
 
+- Automatic row-based reflow with wrapping (similar to text flow)
+- Blocks are automatically reordered after repositioning to maintain a clean grid
+- Grouped blocks are moved as a single unit while preserving their internal order
 
+### Chaining (Grouping)
+
+- Toggle chain mode via the 'o' button or Ctrl+Click
+- Chained blocks move and resize together
+- Uniform height is maintained across chained blocks while preserving aspect ratios
+- **Remembered Chains:** Previously chained groups are remembered - selecting any member auto-selects the entire group (session-persistent)
+
+### Boxing & Containers
+
+- Pack chained blocks into a Box using the toolbar button
+- **Drag-to-Box:** Drop individual blocks directly into a Box
+- Nested boxes are not permitted
+- **Smart Toggle:** The box button re-boxes the last unboxed group or unboxes the most recent box when nothing is selected
+
+### Block UI (Hover)
+
+| Button | Action |
+|--------|--------|
+| 'x' | Delete block |
+| 'o' | Toggle chaining |
+| '#' | Increment (LMB) / Decrement (RMB) counter |
+
+---
+
+## Roadmap
+
+- [ ] Sound options
+- [ ] Text overlay on blocks
+- [ ] Windows support
+- [ ] Mobile support
