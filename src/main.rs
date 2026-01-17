@@ -1207,11 +1207,7 @@ impl MaBlocksApp {
         if let Some(path) = dialog.save_file() {
             let session = Session {
                 blocks: self.blocks.iter().map(|b| self.block_to_data(b)).collect(),
-                remembered_chains: self
-                    .remembered_chains
-                    .iter()
-                    .map(|chain| chain.iter().map(|id| id.to_string()).collect())
-                    .collect(),
+                remembered_chains: self.serialize_remembered_chains(),
             };
 
             if let Ok(file) = std::fs::File::create(&path) {
@@ -1307,6 +1303,26 @@ impl MaBlocksApp {
         }
     }
 
+    fn parse_remembered_chains(chains: Vec<Vec<String>>) -> Vec<ChainedIds> {
+        chains
+            .into_iter()
+            .map(|chain| {
+                chain
+                    .into_iter()
+                    .filter_map(|s| Uuid::parse_str(&s).ok())
+                    .collect()
+            })
+            .filter(|chain: &ChainedIds| chain.len() >= 2)
+            .collect()
+    }
+
+    fn serialize_remembered_chains(&self) -> Vec<Vec<String>> {
+        self.remembered_chains
+            .iter()
+            .map(|chain| chain.iter().map(|id| id.to_string()).collect())
+            .collect()
+    }
+
     /// Loads a previously saved session state from a JSON file.
     fn load_session(&mut self, ctx: &egui::Context) {
         let mut dialog = rfd::FileDialog::new().add_filter("Session", &["json"]);
@@ -1326,17 +1342,8 @@ impl MaBlocksApp {
                             self.blocks.push(block);
                         }
                     }
-                    self.remembered_chains = session
-                        .remembered_chains
-                        .into_iter()
-                        .map(|chain| {
-                            chain
-                                .into_iter()
-                                .filter_map(|s| Uuid::parse_str(&s).ok())
-                                .collect()
-                        })
-                        .filter(|chain: &ChainedIds| chain.len() >= 2)
-                        .collect();
+                    self.remembered_chains =
+                        Self::parse_remembered_chains(session.remembered_chains);
                     self.session_file = Some(path);
                     self.reorder_and_reflow(None);
                 }
