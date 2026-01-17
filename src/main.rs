@@ -858,11 +858,17 @@ impl MaBlocksApp {
                         }
                     }
 
-                    let mut index = 0;
                     let mut hovered_box_to_render = None;
                     let mut dragging_blocks_to_render = Vec::new();
 
-                    while index < self.blocks.len() {
+                    let is_any_dragging = self.blocks.iter().any(|b| b.pos.is_dragging);
+                    let block_ids: Vec<_> = self.blocks.iter().map(|b| b.id).collect();
+
+                    for id in block_ids {
+                        let Some(index) = self.blocks.iter().position(|b| b.id == id) else {
+                            continue;
+                        };
+
                         let block_rect = Rect::from_min_size(
                             self.blocks[index].pos.position * zoom,
                             self.blocks[index].outer_size() * zoom,
@@ -871,7 +877,7 @@ impl MaBlocksApp {
 
                         let block = &self.blocks[index];
                         let rects = block_control_rects(block_rect, zoom);
-                        let block_id = canvas_ui.id().with(block.id);
+                        let block_id = canvas_ui.id().with(id);
                         let is_hovering_block =
                             input.hover_pos.is_some_and(|p| block_rect.contains(p));
                         let hover_state = BlockControlHover::from_mouse_pos(
@@ -929,8 +935,7 @@ impl MaBlocksApp {
                             || self.blocks[index].pos.is_dragging
                             || self.blocks[index].chained;
 
-                        let is_any_dragging = self.blocks.iter().any(|b| b.pos.is_dragging);
-                        let is_hovered_box = Some(self.blocks[index].id) == self.hovered_box_id;
+                        let is_hovered_box = Some(id) == self.hovered_box_id;
                         let should_render_on_top = is_hovered_box
                             || self.blocks[index].pos.is_dragging
                             || (is_any_dragging && self.blocks[index].chained);
@@ -949,16 +954,11 @@ impl MaBlocksApp {
                         }
 
                         if is_hovered_box {
-                            hovered_box_to_render =
-                                Some((self.blocks[index].id, block_rect, config));
+                            hovered_box_to_render = Some((id, block_rect, config));
                         } else if self.blocks[index].pos.is_dragging
                             || (is_any_dragging && self.blocks[index].chained)
                         {
-                            dragging_blocks_to_render.push((
-                                self.blocks[index].id,
-                                block_rect,
-                                config,
-                            ));
+                            dragging_blocks_to_render.push((id, block_rect, config));
                         }
 
                         if !remove
@@ -983,12 +983,9 @@ impl MaBlocksApp {
                         }
 
                         if remove {
-                            self.animation_access_order
-                                .retain(|&x| x != self.blocks[index].id);
+                            self.animation_access_order.retain(|&x| x != id);
                             self.blocks.remove(index);
                             should_reflow = true;
-                        } else {
-                            index += 1;
                         }
                     }
 
