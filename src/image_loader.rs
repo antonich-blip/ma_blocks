@@ -207,6 +207,8 @@ mod avif_support {
         let decoder =
             DecoderGuard::new().ok_or_else(|| "Failed to create AVIF decoder".to_string())?;
 
+        // SAFETY: decoder.decoder is a valid pointer from DecoderGuard::new(),
+        // and bytes.as_ptr() is valid for bytes.len() as it comes from a slice.
         unsafe {
             let result =
                 libavif_sys::avifDecoderSetIOMemory(decoder.decoder, bytes.as_ptr(), bytes.len());
@@ -220,7 +222,9 @@ mod avif_support {
             }
         }
 
+        // SAFETY: decoder.decoder is a valid pointer to an initialized avifDecoder.
         let image_count = unsafe { (*decoder.decoder).imageCount as usize };
+        // SAFETY: decoder.decoder is a valid pointer to an initialized avifDecoder.
         let total_duration = unsafe { (*decoder.decoder).duration };
         let fallback_duration = if image_count > 1 && total_duration > 0.0 {
             total_duration / image_count as f64
@@ -240,14 +244,17 @@ mod avif_support {
         };
 
         while (frame_index as usize) < limit {
+            // SAFETY: decoder.decoder is a valid pointer to an initialized avifDecoder.
             let result = unsafe { libavif_sys::avifDecoderNextImage(decoder.decoder) };
             if result == libavif_sys::AVIF_RESULT_OK {
+                // SAFETY: decoder.decoder is a valid pointer to an initialized avifDecoder.
                 let image = unsafe { (*decoder.decoder).image };
                 if image.is_null() {
                     frame_index += 1;
                     continue;
                 }
 
+                // SAFETY: image is checked for null before dereferencing and is owned by the decoder.
                 let (width, height) = unsafe { ((*image).width, (*image).height) };
                 if width == 0 || height == 0 {
                     frame_index += 1;
@@ -259,6 +266,8 @@ mod avif_support {
                 rgb.convert_from_yuv(image);
                 let pixels = rgb.extract_pixels();
 
+                // SAFETY: decoder.decoder is valid, and frame_index is within bounds (0..image_count).
+                // timing is zero-initialized and passed as a mutable reference.
                 let duration_secs = unsafe {
                     let mut timing: libavif_sys::avifImageTiming = std::mem::zeroed();
                     let timing_result = libavif_sys::avifDecoderNthImageTiming(
@@ -327,10 +336,12 @@ mod avif_support {
 
     impl DecoderGuard {
         fn new() -> Option<Self> {
+            // SAFETY: libavif_sys::avifDecoderCreate() is safe to call.
             let decoder = unsafe { libavif_sys::avifDecoderCreate() };
             if decoder.is_null() {
                 None
             } else {
+                // SAFETY: decoder is checked for null before dereferencing.
                 unsafe {
                     let num_cpus = std::thread::available_parallelism()
                         .map(|p| p.get() as i32)
@@ -344,6 +355,7 @@ mod avif_support {
 
     impl Drop for DecoderGuard {
         fn drop(&mut self) {
+            // SAFETY: self.decoder was created by avifDecoderCreate and hasn't been destroyed yet.
             unsafe {
                 libavif_sys::avifDecoderDestroy(self.decoder);
             }
@@ -358,12 +370,14 @@ mod avif_support {
     impl RgbImageGuard {
         fn new() -> Self {
             Self {
+                // SAFETY: libavif_sys::avifRGBImage is a POD type and can be safely zero-initialized.
                 rgb: unsafe { std::mem::zeroed() },
                 allocated: false,
             }
         }
 
         fn allocate(&mut self, image: *const libavif_sys::avifImage) {
+            // SAFETY: self.rgb is zero-initialized and image is a valid pointer from the decoder.
             unsafe {
                 libavif_sys::avifRGBImageSetDefaults(&mut self.rgb, image);
                 self.rgb.format = libavif_sys::AVIF_RGB_FORMAT_RGBA;
@@ -374,6 +388,7 @@ mod avif_support {
         }
 
         fn convert_from_yuv(&mut self, image: *const libavif_sys::avifImage) {
+            // SAFETY: image is a valid pointer from the decoder, and self.rgb has had pixels allocated.
             unsafe {
                 libavif_sys::avifImageYUVToRGB(image, &mut self.rgb);
             }
@@ -385,6 +400,7 @@ mod avif_support {
             let row_bytes = self.rgb.rowBytes;
 
             let mut packed_pixels = Vec::with_capacity((width * height * 4) as usize);
+            // SAFETY: self.rgb.pixels was allocated by avifRGBImageAllocatePixels and row_bytes * height is the correct size.
             unsafe {
                 let pixel_slice =
                     std::slice::from_raw_parts(self.rgb.pixels, (row_bytes * height) as usize);
@@ -401,6 +417,7 @@ mod avif_support {
     impl Drop for RgbImageGuard {
         fn drop(&mut self) {
             if self.allocated {
+                // SAFETY: self.rgb.pixels was allocated by avifRGBImageAllocatePixels.
                 unsafe {
                     libavif_sys::avifRGBImageFreePixels(&mut self.rgb);
                 }
