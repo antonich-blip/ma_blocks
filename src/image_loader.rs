@@ -7,8 +7,10 @@ use std::io::Cursor;
 use std::path::Path;
 use std::time::Duration;
 
+/// Maximum number of frames to load for an animation to prevent excessive memory usage.
 pub const MAX_ANIMATION_FRAMES: usize = 128;
 
+/// A single frame of an animated image, including its pixel data and display duration.
 #[derive(Clone)]
 pub struct AnimationFrame {
     pub image: ColorImage,
@@ -22,6 +24,7 @@ impl AnimationFrame {
     }
 }
 
+/// Holds all frames and metadata for a loaded image, supporting both static and animated formats.
 pub struct LoadedImage {
     pub frames: Vec<AnimationFrame>,
     pub original_size: egui::Vec2,
@@ -61,7 +64,7 @@ pub fn load_image_frames_scaled(
         ImageFormat::Gif => decode_gif(&bytes, first_frame_only),
         ImageFormat::WebP => decode_webp(&bytes, first_frame_only),
         ImageFormat::Avif => decode_avif(&bytes, first_frame_only).or_else(|err| {
-            log::warn!("Falling back to static AVIF decode: {}", err);
+            log::warn!("Falling back to static AVIF decode: {err}");
             decode_static(&bytes, ImageFormat::Avif)
         }),
         _ => decode_static(&bytes, format),

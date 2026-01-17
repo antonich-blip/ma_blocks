@@ -6,22 +6,28 @@ use block::{
     block_control_rects, handle_blocks_resizing, BlockControlHover, BlockRenderConfig, ImageBlock,
     InteractionState, ResizeHandle, BLOCK_PADDING, MIN_BLOCK_SIZE,
 };
-use eframe::egui::{self, Color32, Rect, RichText, Sense, UiBuilder, Vec2};
+use eframe::egui::{self, Color32, Pos2, Rect, RichText, Sense, UiBuilder, Vec2};
 use egui::{pos2, vec2};
 use paths::AppPaths;
 use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Duration;
 use uuid::Uuid;
 
+/// Spacing between the canvas edges and the blocks.
 const CANVAS_PADDING: f32 = 32.0;
+/// The target width for the inner canvas content, used as a reference for layout.
 const CANVAS_WORKING_WIDTH: f32 = 1400.0;
+/// Horizontal and vertical spacing between blocks to maintain a clean grid-like appearance.
 const ALIGN_SPACING: f32 = 24.0;
+/// Maximum dimension (width or height) for any single block to prevent oversized images from breaking the layout.
 const MAX_BLOCK_DIMENSION: f32 = 420.0;
+/// Minimum width the canvas can take, ensuring at least one block plus padding can be displayed.
 const MIN_CANVAS_INNER_WIDTH: f32 = MIN_BLOCK_SIZE + BLOCK_PADDING * 2.0;
+/// Maximum number of animations to keep in memory simultaneously to manage resources effectively.
 const MAX_CACHED_ANIMATIONS: usize = 20;
 
 type ChainedIds = HashSet<Uuid>;
@@ -46,6 +52,7 @@ fn main() -> eframe::Result<()> {
     )
 }
 
+/// Represents a saved application session, containing blocks and their relationships.
 #[derive(Serialize, Deserialize)]
 struct Session {
     blocks: Vec<BlockData>,
@@ -53,6 +60,7 @@ struct Session {
     remembered_chains: Vec<Vec<String>>,
 }
 
+/// Serialized form of an ImageBlock for persistence.
 #[derive(Serialize, Deserialize)]
 struct BlockData {
     id: Uuid,
@@ -72,6 +80,7 @@ struct BlockData {
     children: Vec<BlockData>,
 }
 
+/// The main application state holding all blocks and UI interaction states.
 struct MaBlocksApp {
     blocks: Vec<ImageBlock>,
     next_block_id: usize,
@@ -98,7 +107,7 @@ impl MaBlocksApp {
         let paths = AppPaths::from_project_dirs();
         if let Some(ref p) = paths {
             if let Err(err) = p.ensure_dirs_exist() {
-                log::error!("Failed to create default directories: {}", err);
+                log::error!("Failed to create default directories: {err}");
             }
         }
         Self {
@@ -180,12 +189,12 @@ impl MaBlocksApp {
                         } else {
                             match self.insert_loaded_image(ctx, path, loaded, is_full) {
                                 Ok(id) => added_ids.push(id),
-                                Err(err) => log::error!("{}", err),
+                                Err(err) => log::error!("{err}"),
                             }
                         }
                     }
                     Err(err) => {
-                        log::error!("Failed to load image: {}", err);
+                        log::error!("Failed to load image: {err}");
                     }
                 }
                 got_any = true;
@@ -223,28 +232,20 @@ impl MaBlocksApp {
     fn purge_animation_frames(&mut self, id: Uuid) {
         if let Some(block) = self.blocks.iter_mut().find(|b| b.id == id) {
             if block.is_full_sequence && block.frames.len() > 1 {
-                // Keep only the first frame
                 block.frames.truncate(1);
                 block.is_full_sequence = false;
-                block.animation_enabled = false;
-                block.current_frame = 0;
-                // Reset texture to first frame
-                if let Some(first) = block.frames.first() {
-                    block
-                        .texture
-                        .set(first.image.clone(), egui::TextureOptions::LINEAR);
-                }
+                block.stop_animation();
             }
         }
     }
 
-    fn insert_loaded_image(
+    fn create_block_from_loaded(
         &mut self,
         ctx: &egui::Context,
         path: PathBuf,
         loaded: image_loader::LoadedImage,
         is_full: bool,
-    ) -> Result<Uuid, String> {
+    ) -> Result<ImageBlock, String> {
         if loaded.frames.is_empty() {
             return Err(format!(
                 "{} did not contain renderable frames",
@@ -258,6 +259,7 @@ impl MaBlocksApp {
             loaded.frames[0].image.clone(),
             egui::TextureOptions::LINEAR,
         );
+        self.next_block_id += 1;
 
         let image_size = scaled_size(loaded.original_size);
         let mut block = ImageBlock::new(
@@ -268,8 +270,18 @@ impl MaBlocksApp {
             loaded.has_animation,
             is_full,
         );
-        self.next_block_id += 1;
         block.position = pos2(CANVAS_PADDING, CANVAS_PADDING);
+        Ok(block)
+    }
+
+    fn insert_loaded_image(
+        &mut self,
+        ctx: &egui::Context,
+        path: PathBuf,
+        loaded: image_loader::LoadedImage,
+        is_full: bool,
+    ) -> Result<Uuid, String> {
+        let block = self.create_block_from_loaded(ctx, path, loaded, is_full)?;
         let id = block.id;
         self.blocks.push(block);
 
@@ -278,16 +290,6 @@ impl MaBlocksApp {
         }
 
         Ok(id)
-    }
-
-    fn insert_block_from_path(
-        &mut self,
-        ctx: &egui::Context,
-        path: PathBuf,
-    ) -> Result<Uuid, String> {
-        let loaded =
-            image_loader::load_image_frames_scaled(&path, Some(MAX_BLOCK_DIMENSION as u32), true)?;
-        self.insert_loaded_image(ctx, path, loaded, false)
     }
 
     fn advance_animations(&mut self, dt: f32, ctx: &egui::Context) {
@@ -443,20 +445,6 @@ impl MaBlocksApp {
         }
         children.reverse();
 
-        let group_name = if children.len() > 1 {
-            format!("Group of {}", children.len())
-        } else if children.len() == 1 {
-            format!(
-                "Box: {}",
-                Path::new(&children[0].path)
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("unnamed")
-            )
-        } else {
-            "Empty Group".to_string()
-        };
-
         let texture = ctx.load_texture(
             format!("group-texture-{}", self.next_block_id),
             egui::ColorImage::new([1, 1], Color32::from_rgb(200, 180, 100)),
@@ -467,7 +455,8 @@ impl MaBlocksApp {
         let representative_texture = children.first().map(|c| c.texture.clone());
 
         let mut group_block =
-            ImageBlock::new_group(group_name, children, texture, representative_texture);
+            ImageBlock::new_group(String::new(), children, texture, representative_texture);
+        group_block.update_group_name();
         group_block.position = min_pos;
         let new_id = group_block.id;
         self.blocks.insert(0, group_block);
@@ -531,18 +520,7 @@ impl MaBlocksApp {
         }
 
         box_block.children.push(block);
-
-        if box_block.children.len() > 1 {
-            box_block.group_name = format!("Group of {}", box_block.children.len());
-        } else if box_block.children.len() == 1 {
-            box_block.group_name = format!(
-                "Box: {}",
-                Path::new(&box_block.children[0].path)
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("unnamed")
-            );
-        }
+        box_block.update_group_name();
     }
 
     fn toggle_compact_group(&mut self, ctx: &egui::Context) {
@@ -629,22 +607,7 @@ impl MaBlocksApp {
                 return;
             }
 
-            remaining.sort_by(|a, b| match (a.is_group, b.is_group) {
-                (true, false) => Ordering::Less,
-                (false, true) => Ordering::Greater,
-                _ => {
-                    let a_y_q = (a.position.y / 100.0) as i32;
-                    let b_y_q = (b.position.y / 100.0) as i32;
-                    match a_y_q.cmp(&b_y_q) {
-                        Ordering::Equal => a
-                            .position
-                            .x
-                            .partial_cmp(&b.position.x)
-                            .unwrap_or(Ordering::Equal),
-                        ord => ord,
-                    }
-                }
-            });
+            remaining.sort_by(|a, b| a.cmp_layout(b));
 
             let leader_pos = moved_group
                 .iter()
@@ -688,22 +651,7 @@ impl MaBlocksApp {
                 self.blocks.insert(insert_idx + i, block);
             }
         } else {
-            self.blocks.sort_by(|a, b| match (a.is_group, b.is_group) {
-                (true, false) => Ordering::Less,
-                (false, true) => Ordering::Greater,
-                _ => {
-                    let a_y_q = (a.position.y / 100.0) as i32;
-                    let b_y_q = (b.position.y / 100.0) as i32;
-                    match a_y_q.cmp(&b_y_q) {
-                        Ordering::Equal => a
-                            .position
-                            .x
-                            .partial_cmp(&b.position.x)
-                            .unwrap_or(Ordering::Equal),
-                        ord => ord,
-                    }
-                }
-            });
+            self.blocks.sort_by(|a, b| a.cmp_layout(b));
         }
         self.reflow_blocks();
     }
@@ -885,11 +833,10 @@ impl MaBlocksApp {
                         if !self.blocks[dragging_idx].is_group {
                             if let Some(m_pos) = ui.input(|i| i.pointer.interact_pos()) {
                                 let world_mouse = (m_pos - canvas_origin) / zoom;
-                                if let Some(target_idx) = self.blocks.iter().position(|other| {
-                                    other.id != self.blocks[dragging_idx].id
-                                        && other.is_group
-                                        && other.rect().contains(world_mouse.to_pos2())
-                                }) {
+                                if let Some(target_idx) = self.find_group_at_pos(
+                                    world_mouse.to_pos2(),
+                                    self.blocks[dragging_idx].id,
+                                ) {
                                     self.hovered_box_id = Some(self.blocks[target_idx].id);
                                 }
                             }
@@ -1028,11 +975,10 @@ impl MaBlocksApp {
                             if !self.blocks[index].is_group {
                                 if let Some(m_pos) = ui.input(|i| i.pointer.interact_pos()) {
                                     let world_mouse = (m_pos - canvas_origin) / zoom;
-                                    let target_idx = self.blocks.iter().position(|other| {
-                                        other.id != self.blocks[index].id
-                                            && other.is_group
-                                            && other.rect().contains(world_mouse.to_pos2())
-                                    });
+                                    let target_idx = self.find_group_at_pos(
+                                        world_mouse.to_pos2(),
+                                        self.blocks[index].id,
+                                    );
 
                                     if let Some(t_idx) = target_idx {
                                         self.drop_block_into_box(index, t_idx);
@@ -1221,8 +1167,14 @@ impl MaBlocksApp {
                 return None;
             }
             if let Ok(path_buf) = Path::new(&data.path).canonicalize() {
-                if let Ok(_new_id) = self.insert_block_from_path(ctx, path_buf) {
-                    if let Some(mut block) = self.blocks.pop() {
+                if let Ok(loaded) = image_loader::load_image_frames_scaled(
+                    &path_buf,
+                    Some(MAX_BLOCK_DIMENSION as u32),
+                    true,
+                ) {
+                    if let Ok(mut block) =
+                        self.create_block_from_loaded(ctx, path_buf, loaded, false)
+                    {
                         block.id = data.id;
                         block.color = Color32::from_rgba_unmultiplied(
                             data.color[0],
@@ -1285,6 +1237,12 @@ impl MaBlocksApp {
         for block in &mut self.blocks {
             block.reset_counters_recursive();
         }
+    }
+
+    fn find_group_at_pos(&self, pos: Pos2, exclude_id: Uuid) -> Option<usize> {
+        self.blocks
+            .iter()
+            .position(|b| b.id != exclude_id && b.is_group && b.rect().contains(pos))
     }
 }
 

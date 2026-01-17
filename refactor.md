@@ -15,4 +15,4 @@
 *   Moving UI-related logic from main.rs to a dedicated ui module.
 
 
-wait for user test and user confirmation on a next step after this.
+ After this wait for user test and user confirmation on a next step.

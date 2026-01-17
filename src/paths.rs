@@ -2,6 +2,7 @@ use directories::ProjectDirs;
 use std::fs;
 use std::path::PathBuf;
 
+/// Manages the absolute paths for application-specific storage, ensuring cross-platform compatibility.
 pub struct AppPaths {
     pub _base: PathBuf,
     pub sessions: PathBuf,

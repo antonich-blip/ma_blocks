@@ -1,10 +1,13 @@
 use crate::image_loader::AnimationFrame;
 use eframe::egui::{self, pos2, vec2, Align2, Color32, FontId, Pos2, Rect, Vec2};
+use std::cmp::Ordering;
 use std::path::Path;
 use std::time::Duration;
 use uuid::Uuid;
 
+/// Internal padding within a block to provide visual separation between the image and its border.
 pub const BLOCK_PADDING: f32 = 4.0;
+/// Minimum size for a block's dimension to ensure it remains interactable and visible.
 pub const MIN_BLOCK_SIZE: f32 = 50.0;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -15,6 +18,7 @@ pub enum ResizeHandle {
     BottomRight,
 }
 
+/// Tracks the active state of a block resizing operation, including initial positions for delta calculation.
 #[derive(Clone)]
 pub struct InteractionState {
     pub id: Uuid,
@@ -23,6 +27,7 @@ pub struct InteractionState {
     pub initial_block_rect: Rect,
 }
 
+/// Tracks which control elements of a block are currently hovered by the pointer.
 #[derive(Default, Clone, Copy)]
 pub struct BlockControlHover {
     pub close_hovered: bool,
@@ -57,6 +62,8 @@ pub fn block_control_rects(rect: Rect, _block: &ImageBlock, zoom: f32) -> (Rect,
     (close_rect, chain_rect, counter_rect)
 }
 
+/// The core entity of the application, representing an image or a group of images.
+/// It handles its own rendering, animation state, and interaction properties.
 pub struct ImageBlock {
     pub id: Uuid,
     pub path: String,
@@ -82,6 +89,7 @@ pub struct ImageBlock {
     pub is_full_sequence: bool,
 }
 
+/// Contextual configuration passed during the rendering phase of a block.
 #[derive(Clone, Copy)]
 pub struct BlockRenderConfig {
     pub zoom: f32,
@@ -236,10 +244,17 @@ impl ImageBlock {
         }
         self.animation_enabled = !self.animation_enabled;
         if !self.animation_enabled {
-            self.current_frame = 0;
-            self.frame_elapsed = Duration::ZERO;
-            let first = self.frames.first().cloned().unwrap();
-            self.texture.set(first.image, egui::TextureOptions::LINEAR);
+            self.stop_animation();
+        }
+    }
+
+    pub fn stop_animation(&mut self) {
+        self.animation_enabled = false;
+        self.current_frame = 0;
+        self.frame_elapsed = Duration::ZERO;
+        if let Some(first) = self.frames.first() {
+            self.texture
+                .set(first.image.clone(), egui::TextureOptions::LINEAR);
         }
     }
 
@@ -248,6 +263,44 @@ impl ImageBlock {
         for child in &mut self.children {
             child.reset_counters_recursive();
         }
+    }
+
+    pub fn cmp_layout(&self, other: &Self) -> Ordering {
+        match (self.is_group, other.is_group) {
+            (true, false) => Ordering::Less,
+            (false, true) => Ordering::Greater,
+            _ => {
+                let a_y_q = (self.position.y / 100.0) as i32;
+                let b_y_q = (other.position.y / 100.0) as i32;
+                match a_y_q.cmp(&b_y_q) {
+                    Ordering::Equal => self
+                        .position
+                        .x
+                        .partial_cmp(&other.position.x)
+                        .unwrap_or(Ordering::Equal),
+                    ord => ord,
+                }
+            }
+        }
+    }
+
+    pub fn update_group_name(&mut self) {
+        if !self.is_group {
+            return;
+        }
+        self.group_name = if self.children.len() > 1 {
+            format!("Group of {}", self.children.len())
+        } else if self.children.len() == 1 {
+            format!(
+                "Box: {}",
+                Path::new(&self.children[0].path)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("unnamed")
+            )
+        } else {
+            "Empty Group".to_string()
+        };
     }
 
     pub fn render(&self, ui: &mut egui::Ui, rect: Rect, config: BlockRenderConfig) {
