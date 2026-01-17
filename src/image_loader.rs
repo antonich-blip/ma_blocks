@@ -8,7 +8,7 @@ use std::path::Path;
 use std::time::Duration;
 
 /// Maximum number of frames to load for an animation to prevent excessive memory usage.
-pub const MAX_ANIMATION_FRAMES: usize = 128;
+pub const MAX_ANIMATION_FRAMES: usize = 1024;
 
 /// A single frame of an animated image, including its pixel data and display duration.
 #[derive(Clone)]

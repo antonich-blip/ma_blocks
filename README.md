@@ -51,7 +51,7 @@ MaBlocks2 is designed to handle a large number of images efficiently:
 - **On-Demand Animation:** For animated images (GIF, WebP, AVIF), only the first frame is loaded initially. The full animation sequence is loaded only when you enable animation for that block.
 - **Memory Capping:** 
     - **Downsampling:** Large images are automatically downsampled during loading to fit within reasonable dimensions, significantly reducing VRAM and RAM usage.
-    - **Frame Limits:** Animation sequences are limited to a maximum of 128 frames to prevent excessive memory consumption from long or high-fps animations.
+    - **Frame Limits:** Animation sequences are limited to a maximum of 1024 frames to prevent excessive memory consumption from long or high-fps animations.
     - **Animation Cache (LRU Purging):** To prevent GPU/RAM overload from many active animations, only the 20 most recently played animations are kept in memory. Older animations are automatically purged (reverting to their first frame) and will be reloaded on demand if played again.
 
 
