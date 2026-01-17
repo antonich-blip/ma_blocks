@@ -9,6 +9,8 @@ use uuid::Uuid;
 pub const BLOCK_PADDING: f32 = 4.0;
 /// Minimum size for a block's dimension to ensure it remains interactable and visible.
 pub const MIN_BLOCK_SIZE: f32 = 50.0;
+/// The vertical height used to quantize block positions into rows for sorting and alignment purposes.
+pub const ROW_QUANTIZATION_HEIGHT: f32 = 100.0;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum ResizeHandle {
@@ -35,7 +37,7 @@ pub struct BlockControlHover {
     pub counter_hovered: bool,
 }
 
-pub fn block_control_rects(rect: Rect, _block: &ImageBlock, zoom: f32) -> (Rect, Rect, Rect) {
+pub fn block_control_rects(rect: Rect, zoom: f32) -> (Rect, Rect, Rect) {
     let btn_size = 16.0 * zoom;
     let btn_spacing = 4.0 * zoom;
     let btn_hit_size = btn_size * 1.2;
@@ -270,8 +272,8 @@ impl ImageBlock {
             (true, false) => Ordering::Less,
             (false, true) => Ordering::Greater,
             _ => {
-                let a_y_q = (self.position.y / 100.0) as i32;
-                let b_y_q = (other.position.y / 100.0) as i32;
+                let a_y_q = (self.position.y / ROW_QUANTIZATION_HEIGHT) as i32;
+                let b_y_q = (other.position.y / ROW_QUANTIZATION_HEIGHT) as i32;
                 match a_y_q.cmp(&b_y_q) {
                     Ordering::Equal => self
                         .position
@@ -360,8 +362,7 @@ impl ImageBlock {
         }
 
         if config.show_controls {
-            let (close_rect, chain_rect, counter_rect) =
-                block_control_rects(rect, self, config.zoom);
+            let (close_rect, chain_rect, counter_rect) = block_control_rects(rect, config.zoom);
             let btn_size = 16.0 * config.zoom;
 
             painter.circle_filled(

@@ -4,7 +4,7 @@ mod paths;
 
 use block::{
     block_control_rects, handle_blocks_resizing, BlockControlHover, BlockRenderConfig, ImageBlock,
-    InteractionState, ResizeHandle, BLOCK_PADDING, MIN_BLOCK_SIZE,
+    InteractionState, ResizeHandle, BLOCK_PADDING, MIN_BLOCK_SIZE, ROW_QUANTIZATION_HEIGHT,
 };
 use eframe::egui::{self, Color32, Pos2, Rect, RichText, Sense, UiBuilder, Vec2};
 use egui::{pos2, vec2};
@@ -47,7 +47,7 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(|cc| {
             egui_extras::install_image_loaders(&cc.egui_ctx);
-            Ok(Box::new(MaBlocksApp::new(cc)))
+            Ok(Box::new(MaBlocksApp::new()))
         }),
     )
 }
@@ -102,7 +102,7 @@ struct MaBlocksApp {
 }
 
 impl MaBlocksApp {
-    fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+    fn new() -> Self {
         let (tx, rx) = channel();
         let paths = AppPaths::from_project_dirs();
         if let Some(ref p) = paths {
@@ -130,7 +130,7 @@ impl MaBlocksApp {
         }
     }
 
-    fn load_images(&mut self, _ctx: &egui::Context) {
+    fn load_images(&mut self) {
         let mut dialog = rfd::FileDialog::new()
             .add_filter("Images", &["png", "jpg", "jpeg", "gif", "webp", "avif"]);
 
@@ -625,8 +625,8 @@ impl MaBlocksApp {
             if is_leader_group {
                 insert_idx = group_boundary;
                 for (i, b) in remaining[..group_boundary].iter().enumerate() {
-                    let b_y_q = (b.position.y / 100.0) as i32;
-                    let leader_y_q = (leader_pos.y / 100.0) as i32;
+                    let b_y_q = (b.position.y / ROW_QUANTIZATION_HEIGHT) as i32;
+                    let leader_y_q = (leader_pos.y / ROW_QUANTIZATION_HEIGHT) as i32;
 
                     if leader_y_q < b_y_q || (leader_y_q == b_y_q && leader_pos.x < b.position.x) {
                         insert_idx = i;
@@ -636,8 +636,8 @@ impl MaBlocksApp {
             } else {
                 insert_idx = remaining.len();
                 for (i, b) in remaining[group_boundary..].iter().enumerate() {
-                    let b_y_q = (b.position.y / 100.0) as i32;
-                    let leader_y_q = (leader_pos.y / 100.0) as i32;
+                    let b_y_q = (b.position.y / ROW_QUANTIZATION_HEIGHT) as i32;
+                    let leader_y_q = (leader_pos.y / ROW_QUANTIZATION_HEIGHT) as i32;
 
                     if leader_y_q < b_y_q || (leader_y_q == b_y_q && leader_pos.x < b.position.x) {
                         insert_idx = group_boundary + i;
@@ -724,7 +724,7 @@ impl MaBlocksApp {
                         .on_hover_text("Add Image")
                         .clicked()
                     {
-                        self.load_images(ctx);
+                        self.load_images();
                     }
 
                     if ui
@@ -856,7 +856,7 @@ impl MaBlocksApp {
 
                         let block = &self.blocks[index];
                         let (close_rect, chain_rect, counter_rect) =
-                            block_control_rects(block_rect, block, zoom);
+                            block_control_rects(block_rect, zoom);
 
                         let block_id = canvas_ui.id().with(block.id);
                         let mouse_pos = ui.input(|i| i.pointer.hover_pos());

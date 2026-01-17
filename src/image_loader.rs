@@ -17,12 +17,7 @@ pub struct AnimationFrame {
     pub duration: Duration,
 }
 
-impl AnimationFrame {
-    pub fn size_vec2(&self) -> egui::Vec2 {
-        let [w, h] = self.image.size;
-        egui::vec2(w as f32, h as f32)
-    }
-}
+impl AnimationFrame {}
 
 /// Holds all frames and metadata for a loaded image, supporting both static and animated formats.
 pub struct LoadedImage {
@@ -38,7 +33,10 @@ impl LoadedImage {
     pub fn from_frames(frames: Vec<AnimationFrame>, has_animation: bool) -> Self {
         let original_size = frames
             .first()
-            .map(|frame| frame.size_vec2())
+            .map(|frame| {
+                let [w, h] = frame.image.size;
+                egui::vec2(w as f32, h as f32)
+            })
             .unwrap_or(egui::vec2(1.0, 1.0));
         Self {
             frames,
