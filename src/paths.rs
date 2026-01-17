@@ -9,6 +9,7 @@ pub struct AppPaths {
 }
 
 impl AppPaths {
+    /// Discovers and returns the standard application data paths for the current platform.
     pub fn from_project_dirs() -> Option<Self> {
         ProjectDirs::from("com", "mablocks", "MaBlocks2").map(|dirs| {
             let base = dirs.data_dir().to_path_buf();
@@ -19,6 +20,7 @@ impl AppPaths {
         })
     }
 
+    /// Verifies and creates the required application directories if they do not exist.
     pub fn ensure_dirs_exist(&self) -> std::io::Result<()> {
         fs::create_dir_all(&self.sessions)?;
         fs::create_dir_all(&self.images)?;

@@ -17,8 +17,6 @@ pub struct AnimationFrame {
     pub duration: Duration,
 }
 
-impl AnimationFrame {}
-
 /// Holds all frames and metadata for a loaded image, supporting both static and animated formats.
 pub struct LoadedImage {
     pub frames: Vec<AnimationFrame>,
@@ -26,10 +24,13 @@ pub struct LoadedImage {
     pub has_animation: bool,
 }
 
+/// Result of an image load operation, containing the path, loaded data, and a flag indicating if it's a full sequence.
 pub type ImageLoadResult = (std::path::PathBuf, LoadedImage, bool);
+/// Response type for image loading, wrapping the result in a Result with a string error.
 pub type ImageLoadResponse = Result<ImageLoadResult, String>;
 
 impl LoadedImage {
+    /// Creates a new LoadedImage from a sequence of frames and animation metadata.
     pub fn from_frames(frames: Vec<AnimationFrame>, has_animation: bool) -> Self {
         let original_size = frames
             .first()
@@ -46,6 +47,8 @@ impl LoadedImage {
     }
 }
 
+/// Loads an image from the specified path, optionally scaling it and loading only the first frame.
+/// Supports GIF, WebP, and AVIF formats, falling back to static decoding for other formats.
 pub fn load_image_frames_scaled(
     path: &Path,
     max_dimension: Option<u32>,
@@ -91,6 +94,7 @@ pub fn load_image_frames_scaled(
     Ok(loaded)
 }
 
+/// Decodes a static image using the specified format.
 fn decode_static(bytes: &[u8], format: ImageFormat) -> Result<LoadedImage, String> {
     let image = image::load_from_memory_with_format(bytes, format)
         .map_err(|err| format!("Failed to decode image: {err}"))?;
@@ -104,6 +108,7 @@ fn decode_static(bytes: &[u8], format: ImageFormat) -> Result<LoadedImage, Strin
     ))
 }
 
+/// Decodes a GIF image, optionally loading only the first frame.
 fn decode_gif(bytes: &[u8], first_frame_only: bool) -> Result<LoadedImage, String> {
     let cursor = Cursor::new(bytes);
     let decoder = GifDecoder::new(cursor).map_err(|err| format!("GIF decode error: {err}"))?;
@@ -120,6 +125,7 @@ fn decode_gif(bytes: &[u8], first_frame_only: bool) -> Result<LoadedImage, Strin
     frames_to_loaded_image(frames, true)
 }
 
+/// Decodes a WebP image, optionally loading only the first frame if it's animated.
 fn decode_webp(bytes: &[u8], first_frame_only: bool) -> Result<LoadedImage, String> {
     let decoder =
         WebPDecoder::new(Cursor::new(bytes)).map_err(|err| format!("WebP decode error: {err}"))?;
@@ -141,10 +147,12 @@ fn decode_webp(bytes: &[u8], first_frame_only: bool) -> Result<LoadedImage, Stri
     }
 }
 
+/// Decodes an AVIF image using the specialized AVIF support module.
 fn decode_avif(bytes: &[u8], first_frame_only: bool) -> Result<LoadedImage, String> {
     avif_support::decode(bytes, first_frame_only)
 }
 
+/// Converts a sequence of image frames into a LoadedImage.
 fn frames_to_loaded_image(frames: Vec<Frame>, has_animation: bool) -> Result<LoadedImage, String> {
     if frames.is_empty() {
         return Err("Image did not contain frames".to_string());
@@ -166,12 +174,14 @@ fn frames_to_loaded_image(frames: Vec<Frame>, has_animation: bool) -> Result<Loa
     Ok(LoadedImage::from_frames(converted, has_animation))
 }
 
+/// Helper to convert a DynamicImage into an egui ColorImage.
 fn color_image_from_dynamic(image: DynamicImage) -> egui::ColorImage {
     let rgba = image.to_rgba8();
     let size = [rgba.width() as usize, rgba.height() as usize];
     egui::ColorImage::from_rgba_unmultiplied(size, &rgba.into_raw())
 }
 
+/// Calculates a Duration from an image delay, with a minimum value of 1ms.
 fn duration_from_delay(delay: image::Delay) -> Duration {
     let (numer, denom) = delay.numer_denom_ms();
     let denom = denom.max(1);
@@ -179,6 +189,7 @@ fn duration_from_delay(delay: image::Delay) -> Duration {
     Duration::from_secs_f32((millis / 1000.0).max(0.001))
 }
 
+/// Ensures the duration is non-zero, defaulting to 16ms (roughly 60fps) if zero.
 fn sanitize_duration(duration: Duration) -> Duration {
     if duration.is_zero() {
         Duration::from_millis(16)

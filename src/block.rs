@@ -12,11 +12,16 @@ pub const MIN_BLOCK_SIZE: f32 = 50.0;
 /// The vertical height used to quantize block positions into rows for sorting and alignment purposes.
 pub const ROW_QUANTIZATION_HEIGHT: f32 = 100.0;
 
+/// Defines the four corners of a block that can be used for resizing.
 #[derive(Clone, Copy, PartialEq)]
 pub enum ResizeHandle {
+    /// Top-left corner handle.
     TopLeft,
+    /// Top-right corner handle.
     TopRight,
+    /// Bottom-left corner handle.
     BottomLeft,
+    /// Bottom-right corner handle.
     BottomRight,
 }
 
@@ -76,6 +81,7 @@ impl BlockControlHover {
     }
 }
 
+/// Calculates the hit-rects for block control buttons (close, chain, counter) based on the block's current rect and zoom.
 pub fn block_control_rects(rect: Rect, zoom: f32) -> (Rect, Rect, Rect) {
     let btn_size = 16.0 * zoom;
     let btn_spacing = 4.0 * zoom;
@@ -133,6 +139,7 @@ pub struct BlockRenderConfig {
 }
 
 impl ImageBlock {
+    /// Creates a new ImageBlock for a single image or the first frame of an animation.
     pub fn new(
         path: String,
         texture: egui::TextureHandle,
@@ -180,6 +187,7 @@ impl ImageBlock {
         }
     }
 
+    /// Creates a new group block that contains multiple child blocks.
     pub fn new_group(
         name: String,
         children: Vec<ImageBlock>,
@@ -221,10 +229,12 @@ impl ImageBlock {
         }
     }
 
+    /// Returns the bounding rectangle of the block in its current position.
     pub fn rect(&self) -> Rect {
         Rect::from_min_size(self.pos.position, self.outer_size())
     }
 
+    /// Returns the total size of the block including internal padding.
     pub fn outer_size(&self) -> Vec2 {
         egui::vec2(
             self.image_size.x + BLOCK_PADDING * 2.0,
@@ -251,6 +261,7 @@ impl ImageBlock {
         self.image_size = egui::vec2(constrained_width, constrained_height);
     }
 
+    /// Advances the animation state based on elapsed time. Returns true if the frame changed.
     pub fn update_animation(&mut self, dt: f32) -> bool {
         if !self.anim.animation_enabled || self.anim.frames.len() <= 1 {
             return false;
@@ -348,6 +359,7 @@ impl ImageBlock {
         };
     }
 
+    /// Renders the block and its controls to the UI.
     pub fn render(&self, ui: &mut egui::Ui, rect: Rect, config: BlockRenderConfig) {
         let painter = ui.painter_at(rect);
 
@@ -511,6 +523,7 @@ impl ImageBlock {
     }
 }
 
+/// Handles the resizing logic for a set of blocks based on pointer movement and the current resizing state.
 pub fn handle_blocks_resizing(
     blocks: &mut [ImageBlock],
     resizing_state: &InteractionState,

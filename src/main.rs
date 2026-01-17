@@ -94,6 +94,7 @@ struct InputSnapshot {
     ctrl: bool,
 }
 
+/// The main application state holding all blocks, UI interaction states, and resource management.
 struct MaBlocksApp {
     blocks: Vec<ImageBlock>,
     next_block_id: usize,
@@ -115,6 +116,7 @@ struct MaBlocksApp {
 }
 
 impl MaBlocksApp {
+    /// Initializes the application state, sets up channels, and discovers project directories.
     fn new() -> Self {
         let (tx, rx) = channel();
         let paths = AppPaths::from_project_dirs();
@@ -143,6 +145,7 @@ impl MaBlocksApp {
         }
     }
 
+    /// Opens a file dialog to pick images and triggers background loading for each.
     fn load_images(&mut self) {
         let mut dialog = rfd::FileDialog::new()
             .add_filter("Images", &["png", "jpg", "jpeg", "gif", "webp", "avif"]);
@@ -158,6 +161,7 @@ impl MaBlocksApp {
         }
     }
 
+    /// Spawns a background thread to load and decode an image from the specified path.
     fn trigger_image_load(&self, path: PathBuf, first_frame_only: bool) {
         let tx = self.image_tx.clone();
         std::thread::spawn(move || {
@@ -171,6 +175,7 @@ impl MaBlocksApp {
         });
     }
 
+    /// Polls the image loading channel for completed tasks and integrates them into the application state.
     fn poll_image_rx(&mut self, ctx: &egui::Context) {
         if let Some(rx) = self.image_rx.take() {
             let mut got_any = false;
@@ -327,6 +332,7 @@ impl MaBlocksApp {
         }
     }
 
+    /// Recalculates the positions of all blocks to fit within the current canvas width while respecting groups and alignment.
     fn reflow_blocks(&mut self) {
         let inner_width = self.working_inner_width.max(MIN_CANVAS_INNER_WIDTH);
         let row_limit = CANVAS_PADDING + inner_width;
@@ -433,6 +439,7 @@ impl MaBlocksApp {
         self.skip_chain_cancel = true;
     }
 
+    /// Combines all currently chained blocks into a single group block.
     fn box_group(&mut self, ctx: &egui::Context) -> Uuid {
         let mut chained_indices: Vec<usize> = self
             .blocks
@@ -1187,6 +1194,7 @@ impl MaBlocksApp {
         }
     }
 
+    /// Saves the current session state, including blocks and chains, to a JSON file.
     fn save_session(&mut self) {
         let mut dialog = rfd::FileDialog::new()
             .add_filter("Session", &["json"])
@@ -1299,6 +1307,7 @@ impl MaBlocksApp {
         }
     }
 
+    /// Loads a previously saved session state from a JSON file.
     fn load_session(&mut self, ctx: &egui::Context) {
         let mut dialog = rfd::FileDialog::new().add_filter("Session", &["json"]);
 
