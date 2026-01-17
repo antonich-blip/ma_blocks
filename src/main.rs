@@ -81,6 +81,19 @@ struct BlockData {
 }
 
 /// The main application state holding all blocks and UI interaction states.
+struct InputSnapshot {
+    hover_pos: Option<Pos2>,
+    interact_pos: Option<Pos2>,
+    primary_clicked: bool,
+    secondary_clicked: bool,
+    secondary_pressed: bool,
+    secondary_released: bool,
+    middle_down: bool,
+    pointer_delta: Vec2,
+    zoom_delta: f32,
+    ctrl: bool,
+}
+
 struct MaBlocksApp {
     blocks: Vec<ImageBlock>,
     next_block_id: usize,
@@ -773,9 +786,21 @@ impl MaBlocksApp {
         let mut should_reflow = false;
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            let zoom_delta = ui.input(|i| i.zoom_delta());
-            if zoom_delta != 1.0 {
-                self.zoom = (self.zoom * zoom_delta).clamp(0.1, 10.0);
+            let input = ui.input(|i| InputSnapshot {
+                hover_pos: i.pointer.hover_pos(),
+                interact_pos: i.pointer.interact_pos(),
+                primary_clicked: i.pointer.button_clicked(egui::PointerButton::Primary),
+                secondary_clicked: i.pointer.button_clicked(egui::PointerButton::Secondary),
+                secondary_pressed: i.pointer.button_pressed(egui::PointerButton::Secondary),
+                secondary_released: i.pointer.button_released(egui::PointerButton::Secondary),
+                middle_down: i.pointer.button_down(egui::PointerButton::Middle),
+                pointer_delta: i.pointer.delta(),
+                zoom_delta: i.zoom_delta(),
+                ctrl: i.modifiers.ctrl,
+            });
+
+            if input.zoom_delta != 1.0 {
+                self.zoom = (self.zoom * input.zoom_delta).clamp(0.1, 10.0);
             }
 
             let available_width = ui.available_width();
@@ -792,19 +817,12 @@ impl MaBlocksApp {
                 self.reflow_blocks();
             }
 
-            let input = ui.input(|i| i.clone());
-            let mouse_pos = input.pointer.hover_pos();
-            let secondary_pressed = input.pointer.button_pressed(egui::PointerButton::Secondary);
-            let secondary_released = input
-                .pointer
-                .button_released(egui::PointerButton::Secondary);
-
-            if secondary_released {
+            if input.secondary_released {
                 self.resizing_state = None;
                 should_reflow = true;
             }
 
-            if let Some(curr_mouse_pos) = mouse_pos {
+            if let Some(curr_mouse_pos) = input.hover_pos {
                 if let Some(state) = &self.resizing_state {
                     handle_blocks_resizing(&mut self.blocks, state, curr_mouse_pos, self.zoom);
                 }
@@ -815,9 +833,8 @@ impl MaBlocksApp {
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    if ui.input(|i| i.pointer.button_down(egui::PointerButton::Middle)) {
-                        let delta = ui.input(|i| i.pointer.delta());
-                        ui.scroll_with_delta(delta);
+                    if input.middle_down {
+                        ui.scroll_with_delta(input.pointer_delta);
                     }
 
                     let zoom = self.zoom;
@@ -845,7 +862,7 @@ impl MaBlocksApp {
                     self.hovered_box_id = None;
                     if let Some(dragging_idx) = self.blocks.iter().position(|b| b.pos.is_dragging) {
                         if !self.blocks[dragging_idx].group.is_group {
-                            if let Some(m_pos) = ui.input(|i| i.pointer.interact_pos()) {
+                            if let Some(m_pos) = input.interact_pos {
                                 let world_mouse = (m_pos - canvas_origin) / zoom;
                                 if let Some(target_idx) = self.find_group_at_pos(
                                     world_mouse.to_pos2(),
@@ -872,11 +889,11 @@ impl MaBlocksApp {
                         let rects = block_control_rects(block_rect, zoom);
 
                         let block_id = canvas_ui.id().with(block.id);
-                        let mouse_pos = ui.input(|i| i.pointer.hover_pos());
-                        let is_hovering_block = mouse_pos.is_some_and(|p| block_rect.contains(p));
+                        let is_hovering_block =
+                            input.hover_pos.is_some_and(|p| block_rect.contains(p));
 
                         let hover_state = BlockControlHover::from_mouse_pos(
-                            mouse_pos,
+                            input.hover_pos,
                             &rects,
                             block.group.is_group,
                         );
@@ -885,13 +902,8 @@ impl MaBlocksApp {
                             || hover_state.chain_hovered
                             || hover_state.counter_hovered;
 
-                        let primary_clicked =
-                            ui.input(|i| i.pointer.button_clicked(egui::PointerButton::Primary));
-                        let secondary_clicked =
-                            ui.input(|i| i.pointer.button_clicked(egui::PointerButton::Secondary));
-
                         let mut remove = false;
-                        if primary_clicked {
+                        if input.primary_clicked {
                             if hover_state.close_hovered {
                                 remove = true;
                                 self.skip_chain_cancel = true;
@@ -903,13 +915,13 @@ impl MaBlocksApp {
                             }
                         }
 
-                        if secondary_clicked && hover_state.counter_hovered {
+                        if input.secondary_clicked && hover_state.counter_hovered {
                             self.blocks[index].counter = (self.blocks[index].counter - 1).max(0);
                             self.skip_chain_cancel = true;
                         }
 
-                        if secondary_pressed && is_hovering_block && !any_button_hovered {
-                            if let Some(m_pos) = mouse_pos {
+                        if input.secondary_pressed && is_hovering_block && !any_button_hovered {
+                            if let Some(m_pos) = input.hover_pos {
                                 let world_mouse = (m_pos - canvas_origin) / zoom;
                                 let center = self.blocks[index].rect().center();
                                 let handle =
@@ -985,7 +997,7 @@ impl MaBlocksApp {
 
                             let mut dropped_into_box = false;
                             if !self.blocks[index].group.is_group {
-                                if let Some(m_pos) = ui.input(|i| i.pointer.interact_pos()) {
+                                if let Some(m_pos) = input.interact_pos {
                                     let world_mouse = (m_pos - canvas_origin) / zoom;
                                     let target_idx = self.find_group_at_pos(
                                         world_mouse.to_pos2(),
@@ -1043,8 +1055,8 @@ impl MaBlocksApp {
                             ));
                         }
 
-                        if primary_clicked && response.clicked() && !any_button_hovered {
-                            if ui.input(|i| i.modifiers.ctrl) {
+                        if input.primary_clicked && response.clicked() && !any_button_hovered {
+                            if input.ctrl {
                                 self.toggle_chain_for_block(index);
                             } else if self.blocks[index].anim.has_animation {
                                 if !self.blocks[index].is_full_sequence {
@@ -1083,8 +1095,8 @@ impl MaBlocksApp {
                     }
 
                     if !std::mem::take(&mut self.skip_chain_cancel) {
-                        if ui.input(|i| i.pointer.button_clicked(egui::PointerButton::Primary)) {
-                            if let Some(click_pos) = ui.input(|i| i.pointer.interact_pos()) {
+                        if input.primary_clicked {
+                            if let Some(click_pos) = input.interact_pos {
                                 let world_click = (click_pos - canvas_origin) / zoom;
                                 let hit_block = self
                                     .blocks
