@@ -869,19 +869,17 @@ impl MaBlocksApp {
                         .translate(canvas_origin.to_vec2());
 
                         let block = &self.blocks[index];
-                        let (close_rect, chain_rect, counter_rect) =
-                            block_control_rects(block_rect, zoom);
+                        let rects = block_control_rects(block_rect, zoom);
 
                         let block_id = canvas_ui.id().with(block.id);
                         let mouse_pos = ui.input(|i| i.pointer.hover_pos());
                         let is_hovering_block = mouse_pos.is_some_and(|p| block_rect.contains(p));
 
-                        let hover_state = BlockControlHover {
-                            close_hovered: mouse_pos.is_some_and(|p| close_rect.contains(p)),
-                            chain_hovered: mouse_pos.is_some_and(|p| chain_rect.contains(p)),
-                            counter_hovered: !block.group.is_group
-                                && mouse_pos.is_some_and(|p| counter_rect.contains(p)),
-                        };
+                        let hover_state = BlockControlHover::from_mouse_pos(
+                            mouse_pos,
+                            &rects,
+                            block.group.is_group,
+                        );
 
                         let any_button_hovered = hover_state.close_hovered
                             || hover_state.chain_hovered

@@ -61,6 +61,21 @@ pub struct BlockControlHover {
     pub counter_hovered: bool,
 }
 
+impl BlockControlHover {
+    pub fn from_mouse_pos(
+        mouse_pos: Option<Pos2>,
+        rects: &(Rect, Rect, Rect),
+        is_group: bool,
+    ) -> Self {
+        let (close_rect, chain_rect, counter_rect) = rects;
+        Self {
+            close_hovered: mouse_pos.is_some_and(|p| close_rect.contains(p)),
+            chain_hovered: mouse_pos.is_some_and(|p| chain_rect.contains(p)),
+            counter_hovered: !is_group && mouse_pos.is_some_and(|p| counter_rect.contains(p)),
+        }
+    }
+}
+
 pub fn block_control_rects(rect: Rect, zoom: f32) -> (Rect, Rect, Rect) {
     let btn_size = 16.0 * zoom;
     let btn_spacing = 4.0 * zoom;
