@@ -1,10 +1,17 @@
 mod block;
+mod constants;
 mod image_loader;
 mod paths;
 
 use block::{
     block_control_rects, handle_blocks_resizing, BlockControlHover, BlockRenderConfig, ImageBlock,
-    InteractionState, ResizeHandle, BLOCK_PADDING, MIN_BLOCK_SIZE, ROW_QUANTIZATION_HEIGHT,
+    InteractionState, ResizeHandle,
+};
+use constants::{
+    ALIGN_SPACING, BLOCK_PADDING, CANVAS_PADDING, CANVAS_WORKING_WIDTH, COLOR_GROUP_PLACEHOLDER,
+    COLOR_TOOLBAR_BG, INITIAL_WINDOW_HEIGHT, INITIAL_WINDOW_WIDTH, MAX_BLOCK_DIMENSION,
+    MAX_CACHED_ANIMATIONS, MIN_CANVAS_INNER_WIDTH, ROW_QUANTIZATION_HEIGHT, TOOLBAR_BUTTON_SIZE,
+    TOOLBAR_ICON_SIZE, TOOLBAR_START_SPACING,
 };
 use eframe::egui::{self, Color32, Pos2, Rect, RichText, Sense, UiBuilder, Vec2};
 use egui::{pos2, vec2};
@@ -17,19 +24,6 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Duration;
 use uuid::Uuid;
 
-/// Spacing between the canvas edges and the blocks.
-const CANVAS_PADDING: f32 = 32.0;
-/// The target width for the inner canvas content, used as a reference for layout.
-const CANVAS_WORKING_WIDTH: f32 = 1400.0;
-/// Horizontal and vertical spacing between blocks to maintain a clean grid-like appearance.
-const ALIGN_SPACING: f32 = 24.0;
-/// Maximum dimension (width or height) for any single block to prevent oversized images from breaking the layout.
-const MAX_BLOCK_DIMENSION: f32 = 420.0;
-/// Minimum width the canvas can take, ensuring at least one block plus padding can be displayed.
-const MIN_CANVAS_INNER_WIDTH: f32 = MIN_BLOCK_SIZE + BLOCK_PADDING * 2.0;
-/// Maximum number of animations to keep in memory simultaneously to manage resources effectively.
-const MAX_CACHED_ANIMATIONS: usize = 20;
-
 type ChainedIds = HashSet<Uuid>;
 
 fn main() -> eframe::Result<()> {
@@ -37,7 +31,7 @@ fn main() -> eframe::Result<()> {
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([800.0, 600.0])
+            .with_inner_size([INITIAL_WINDOW_WIDTH, INITIAL_WINDOW_HEIGHT])
             .with_drag_and_drop(true),
         ..Default::default()
     };
@@ -84,7 +78,7 @@ struct BlockData {
     children: Vec<BlockData>,
 }
 
-/// The main application state holding all blocks and UI interaction states.
+/// Captures pointer and modifier state for a single frame.
 struct InputSnapshot {
     hover_pos: Option<Pos2>,
     interact_pos: Option<Pos2>,
@@ -96,6 +90,23 @@ struct InputSnapshot {
     pointer_delta: Vec2,
     zoom_delta: f32,
     ctrl: bool,
+}
+
+impl InputSnapshot {
+    fn from_ui(ui: &egui::Ui) -> Self {
+        ui.input(|i| Self {
+            hover_pos: i.pointer.hover_pos(),
+            interact_pos: i.pointer.interact_pos(),
+            primary_clicked: i.pointer.button_clicked(egui::PointerButton::Primary),
+            secondary_clicked: i.pointer.button_clicked(egui::PointerButton::Secondary),
+            secondary_pressed: i.pointer.button_pressed(egui::PointerButton::Secondary),
+            secondary_released: i.pointer.button_released(egui::PointerButton::Secondary),
+            middle_down: i.pointer.button_down(egui::PointerButton::Middle),
+            pointer_delta: i.pointer.delta(),
+            zoom_delta: i.zoom_delta(),
+            ctrl: i.modifiers.ctrl,
+        })
+    }
 }
 
 /// The main application state holding all blocks, UI interaction states, and resource management.
@@ -471,7 +482,7 @@ impl MaBlocksApp {
 
         let texture = ctx.load_texture(
             format!("group-texture-{}", self.next_block_id),
-            egui::ColorImage::new([1, 1], Color32::from_rgb(200, 180, 100)),
+            egui::ColorImage::new([1, 1], COLOR_GROUP_PLACEHOLDER),
             egui::TextureOptions::LINEAR,
         );
         self.next_block_id += 1;
@@ -547,51 +558,94 @@ impl MaBlocksApp {
         box_block.update_group_name();
     }
 
-    fn toggle_compact_group(&mut self, ctx: &egui::Context) {
-        let chained_count = self.blocks.iter().filter(|b| b.chained).count();
+    /// Attempts to re-box previously unboxed blocks. Returns true if action was taken.
+    fn try_rebox_last_unboxed(&mut self, ctx: &egui::Context) -> bool {
+        if self.last_unboxed_ids.is_empty() {
+            return false;
+        }
 
-        if chained_count == 0 {
-            if !self.last_unboxed_ids.is_empty() {
-                let mut found_any = false;
-                for block in &mut self.blocks {
-                    if self.last_unboxed_ids.contains(&block.id) {
-                        block.chained = true;
-                        found_any = true;
-                    }
-                }
-                if found_any {
-                    self.last_boxed_id = Some(self.box_group(ctx));
-                    self.last_unboxed_ids.clear();
-                    return;
-                }
-            } else if let Some(last_id) = self.last_boxed_id {
-                if let Some(idx) = self.blocks.iter().position(|b| b.id == last_id) {
-                    self.last_unboxed_ids = self.blocks[idx]
-                        .group
-                        .children
-                        .iter()
-                        .map(|c| c.id)
-                        .collect();
-                    self.unbox_group(idx);
-                    self.last_boxed_id = None;
-                    return;
-                }
+        let mut found_any = false;
+        for block in &mut self.blocks {
+            if self.last_unboxed_ids.contains(&block.id) {
+                block.chained = true;
+                found_any = true;
             }
         }
 
-        let chained: Vec<&ImageBlock> = self.blocks.iter().filter(|b| b.chained).collect();
+        if found_any {
+            self.last_boxed_id = Some(self.box_group(ctx));
+            self.last_unboxed_ids.clear();
+        }
+        found_any
+    }
 
-        if chained.len() == 1 && chained[0].group.is_group {
-            let idx = self.blocks.iter().position(|b| b.chained).unwrap();
-            self.last_unboxed_ids = self.blocks[idx]
-                .group
-                .children
-                .iter()
-                .map(|c| c.id)
-                .collect();
-            self.unbox_group(idx);
-            self.last_boxed_id = None;
-        } else if !chained.is_empty() {
+    /// Attempts to unbox the last boxed group. Returns true if action was taken.
+    fn try_unbox_last_boxed(&mut self) -> bool {
+        let Some(last_id) = self.last_boxed_id else {
+            return false;
+        };
+
+        let Some(idx) = self.blocks.iter().position(|b| b.id == last_id) else {
+            return false;
+        };
+
+        self.last_unboxed_ids = self.blocks[idx]
+            .group
+            .children
+            .iter()
+            .map(|c| c.id)
+            .collect();
+        self.unbox_group(idx);
+        self.last_boxed_id = None;
+        true
+    }
+
+    /// Unboxes a single chained group block.
+    fn unbox_single_chained_group(&mut self) -> bool {
+        let chained_groups: Vec<_> = self
+            .blocks
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| b.chained && b.group.is_group)
+            .collect();
+
+        if chained_groups.len() != 1 {
+            return false;
+        }
+
+        let idx = chained_groups[0].0;
+        self.last_unboxed_ids = self.blocks[idx]
+            .group
+            .children
+            .iter()
+            .map(|c| c.id)
+            .collect();
+        self.unbox_group(idx);
+        self.last_boxed_id = None;
+        true
+    }
+
+    fn toggle_compact_group(&mut self, ctx: &egui::Context) {
+        let chained_count = self.blocks.iter().filter(|b| b.chained).count();
+
+        // No blocks chained - try to restore previous state
+        if chained_count == 0 {
+            if self.try_rebox_last_unboxed(ctx) {
+                return;
+            }
+            if self.try_unbox_last_boxed() {
+                return;
+            }
+            return;
+        }
+
+        // Single chained group - unbox it
+        if self.unbox_single_chained_group() {
+            return;
+        }
+
+        // Multiple chained blocks - box them
+        if chained_count > 0 {
             self.last_boxed_id = Some(self.box_group(ctx));
             self.last_unboxed_ids.clear();
         }
@@ -718,74 +772,43 @@ impl eframe::App for MaBlocksApp {
     }
 }
 
+/// Creates a toolbar button with consistent styling.
+fn toolbar_button(ui: &mut egui::Ui, icon: &str, tooltip: &str) -> bool {
+    ui.add(
+        egui::Button::new(RichText::new(icon).size(TOOLBAR_ICON_SIZE))
+            .min_size(Vec2::splat(TOOLBAR_BUTTON_SIZE))
+            .frame(false),
+    )
+    .on_hover_text(tooltip)
+    .clicked()
+}
+
 impl MaBlocksApp {
     fn render_toolbar(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("toolbar")
             .frame(
                 egui::Frame::default()
-                    .fill(Color32::from_rgb(30, 30, 30))
+                    .fill(COLOR_TOOLBAR_BG)
                     .inner_margin(0.0)
                     .outer_margin(0.0),
             )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    ui.add_space(8.0);
-                    if ui
-                        .add(
-                            egui::Button::new(RichText::new("💾").size(24.0))
-                                .min_size(Vec2::new(32.0, 32.0))
-                                .frame(false),
-                        )
-                        .on_hover_text("Save Session")
-                        .clicked()
-                    {
+                    ui.add_space(TOOLBAR_START_SPACING);
+
+                    if toolbar_button(ui, "💾", "Save Session") {
                         self.save_session();
                     }
-                    if ui
-                        .add(
-                            egui::Button::new(RichText::new("📂").size(24.0))
-                                .min_size(Vec2::new(32.0, 32.0))
-                                .frame(false),
-                        )
-                        .on_hover_text("Load Session")
-                        .clicked()
-                    {
+                    if toolbar_button(ui, "📂", "Load Session") {
                         self.load_session(ctx);
                     }
-
-                    if ui
-                        .add(
-                            egui::Button::new(RichText::new("🖼").size(24.0))
-                                .min_size(Vec2::new(32.0, 32.0))
-                                .frame(false),
-                        )
-                        .on_hover_text("Add Image")
-                        .clicked()
-                    {
+                    if toolbar_button(ui, "🖼", "Add Image") {
                         self.load_images();
                     }
-
-                    if ui
-                        .add(
-                            egui::Button::new(RichText::new("🔄").size(24.0))
-                                .min_size(Vec2::new(32.0, 32.0))
-                                .frame(false),
-                        )
-                        .on_hover_text("Reset All Counters")
-                        .clicked()
-                    {
+                    if toolbar_button(ui, "🔄", "Reset All Counters") {
                         self.reset_all_counters();
                     }
-
-                    if ui
-                        .add(
-                            egui::Button::new(RichText::new("📦").size(24.0))
-                                .min_size(Vec2::new(32.0, 32.0))
-                                .frame(false),
-                        )
-                        .on_hover_text("Compact/Unbox Group")
-                        .clicked()
-                    {
+                    if toolbar_button(ui, "📦", "Compact/Unbox Group") {
                         self.toggle_compact_group(ctx);
                     }
                 });
@@ -797,18 +820,7 @@ impl MaBlocksApp {
         let mut should_reflow = false;
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            let input = ui.input(|i| InputSnapshot {
-                hover_pos: i.pointer.hover_pos(),
-                interact_pos: i.pointer.interact_pos(),
-                primary_clicked: i.pointer.button_clicked(egui::PointerButton::Primary),
-                secondary_clicked: i.pointer.button_clicked(egui::PointerButton::Secondary),
-                secondary_pressed: i.pointer.button_pressed(egui::PointerButton::Secondary),
-                secondary_released: i.pointer.button_released(egui::PointerButton::Secondary),
-                middle_down: i.pointer.button_down(egui::PointerButton::Middle),
-                pointer_delta: i.pointer.delta(),
-                zoom_delta: i.zoom_delta(),
-                ctrl: i.modifiers.ctrl,
-            });
+            let input = InputSnapshot::from_ui(ui);
 
             self.handle_zoom_input(ui, &input);
 
@@ -833,18 +845,7 @@ impl MaBlocksApp {
                     }
 
                     let zoom = self.zoom;
-                    let content_height = self
-                        .blocks
-                        .iter()
-                        .map(|b| b.pos.position.y + b.outer_size().y)
-                        .fold(0.0, |a: f32, b| a.max(b));
-                    let min_height = ui.available_height() / zoom;
-                    let canvas_height = (content_height + CANVAS_PADDING).max(min_height);
-
-                    let canvas_size = vec2(
-                        (self.working_inner_width + CANVAS_PADDING * 2.0) * zoom,
-                        canvas_height * zoom,
-                    );
+                    let canvas_size = self.calculate_canvas_size(ui.available_height());
                     let (canvas_rect, _) = ui.allocate_exact_size(canvas_size, Sense::hover());
 
                     let mut canvas_ui = ui.new_child(
@@ -854,20 +855,7 @@ impl MaBlocksApp {
                     );
                     let canvas_origin = canvas_rect.min;
 
-                    self.hovered_box_id = None;
-                    if let Some(dragging_idx) = self.blocks.iter().position(|b| b.pos.is_dragging) {
-                        if !self.blocks[dragging_idx].group.is_group {
-                            if let Some(m_pos) = input.interact_pos {
-                                let world_mouse = (m_pos - canvas_origin) / zoom;
-                                if let Some(target_idx) = self.find_group_at_pos(
-                                    world_mouse.to_pos2(),
-                                    self.blocks[dragging_idx].id,
-                                ) {
-                                    self.hovered_box_id = Some(self.blocks[target_idx].id);
-                                }
-                            }
-                        }
-                    }
+                    self.update_drop_target(&input, canvas_origin, zoom);
 
                     let mut hovered_box_to_render = None;
                     let mut dragging_blocks_to_render = Vec::new();
@@ -977,20 +965,7 @@ impl MaBlocksApp {
                             && response.clicked()
                             && !any_button_hovered
                         {
-                            if input.ctrl {
-                                self.toggle_chain_for_block(index);
-                            } else if self.blocks[index].anim.has_animation {
-                                if !self.blocks[index].is_full_sequence {
-                                    let path = PathBuf::from(&self.blocks[index].path);
-                                    self.trigger_image_load(path, false);
-                                } else {
-                                    self.blocks[index].toggle_animation();
-                                    if self.blocks[index].anim.animation_enabled {
-                                        let id = self.blocks[index].id;
-                                        self.mark_animation_used(id);
-                                    }
-                                }
-                            }
+                            self.handle_block_click(index, input.ctrl);
                         }
 
                         if remove {
@@ -1006,20 +981,7 @@ impl MaBlocksApp {
                         hovered_box_to_render,
                     );
 
-                    if !std::mem::take(&mut self.skip_chain_cancel) {
-                        if input.primary_clicked {
-                            if let Some(click_pos) = input.interact_pos {
-                                let world_click = (click_pos - canvas_origin) / zoom;
-                                let hit_block = self
-                                    .blocks
-                                    .iter()
-                                    .any(|b| b.rect().contains(world_click.to_pos2()));
-                                if !hit_block {
-                                    self.clear_chain_group();
-                                }
-                            }
-                        }
-                    }
+                    self.handle_canvas_background_click(&input, canvas_origin, zoom);
                 });
         });
 
@@ -1043,6 +1005,101 @@ impl MaBlocksApp {
         if (target_inner_width - self.working_inner_width).abs() > 0.5 {
             self.working_inner_width = target_inner_width;
             self.reflow_blocks();
+        }
+    }
+
+    /// Calculates the canvas size based on block positions and available viewport height.
+    fn calculate_canvas_size(&self, available_height: f32) -> Vec2 {
+        let zoom = self.zoom;
+        let content_height = self
+            .blocks
+            .iter()
+            .map(|b| b.pos.position.y + b.outer_size().y)
+            .fold(0.0, |a: f32, b| a.max(b));
+        let min_height = available_height / zoom;
+        let canvas_height = (content_height + CANVAS_PADDING).max(min_height);
+
+        vec2(
+            (self.working_inner_width + CANVAS_PADDING * 2.0) * zoom,
+            canvas_height * zoom,
+        )
+    }
+
+    /// Updates the hovered drop target when dragging a non-group block over groups.
+    fn update_drop_target(&mut self, input: &InputSnapshot, canvas_origin: Pos2, zoom: f32) {
+        self.hovered_box_id = None;
+
+        let Some(dragging_idx) = self.blocks.iter().position(|b| b.pos.is_dragging) else {
+            return;
+        };
+
+        if self.blocks[dragging_idx].group.is_group {
+            return;
+        }
+
+        let Some(m_pos) = input.interact_pos else {
+            return;
+        };
+
+        let world_mouse = (m_pos - canvas_origin) / zoom;
+        if let Some(target_idx) =
+            self.find_group_at_pos(world_mouse.to_pos2(), self.blocks[dragging_idx].id)
+        {
+            self.hovered_box_id = Some(self.blocks[target_idx].id);
+        }
+    }
+
+    /// Clears chain selection when clicking on empty canvas area.
+    fn handle_canvas_background_click(
+        &mut self,
+        input: &InputSnapshot,
+        canvas_origin: Pos2,
+        zoom: f32,
+    ) {
+        if std::mem::take(&mut self.skip_chain_cancel) {
+            return;
+        }
+
+        if !input.primary_clicked {
+            return;
+        }
+
+        let Some(click_pos) = input.interact_pos else {
+            return;
+        };
+
+        let world_click = (click_pos - canvas_origin) / zoom;
+        let hit_block = self
+            .blocks
+            .iter()
+            .any(|b| b.rect().contains(world_click.to_pos2()));
+
+        if !hit_block {
+            self.clear_chain_group();
+        }
+    }
+
+    /// Handles a click on a block - toggles chain or animation.
+    fn handle_block_click(&mut self, index: usize, ctrl_held: bool) {
+        if ctrl_held {
+            self.toggle_chain_for_block(index);
+            return;
+        }
+
+        let block = &mut self.blocks[index];
+        if !block.anim.has_animation {
+            return;
+        }
+
+        if !block.is_full_sequence {
+            let path = PathBuf::from(&block.path);
+            self.trigger_image_load(path, false);
+        } else {
+            self.blocks[index].toggle_animation();
+            if self.blocks[index].anim.animation_enabled {
+                let id = self.blocks[index].id;
+                self.mark_animation_used(id);
+            }
         }
     }
 
@@ -1254,7 +1311,7 @@ impl MaBlocksApp {
 
             let texture = ctx.load_texture(
                 format!("group-texture-{}", self.next_block_id),
-                egui::ColorImage::new([1, 1], Color32::from_rgb(200, 180, 100)),
+                egui::ColorImage::new([1, 1], COLOR_GROUP_PLACEHOLDER),
                 egui::TextureOptions::LINEAR,
             );
             self.next_block_id += 1;

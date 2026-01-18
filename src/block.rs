@@ -1,16 +1,21 @@
+use crate::constants::{
+    BLOCK_CORNER_RADIUS, BLOCK_PADDING, BUTTON_BASE_SIZE, BUTTON_HIT_AREA_MULTIPLIER,
+    BUTTON_ICON_FONT_SIZE, BUTTON_SPACING, COLOR_CHAINED_GROUP_BG, COLOR_CHAIN_ACTIVE,
+    COLOR_CHAIN_DISABLED, COLOR_CHAIN_HOVER, COLOR_CHAIN_NORMAL, COLOR_CLOSE_BUTTON,
+    COLOR_CLOSE_BUTTON_HOVER, COLOR_COUNTER_BADGE, COLOR_COUNTER_BUTTON,
+    COLOR_COUNTER_BUTTON_HOVER, COLOR_LABEL_BG_ALPHA, COLOR_NORMAL_GROUP_BG, COUNTER_BADGE_OFFSET,
+    COUNTER_BADGE_RADIUS, COUNTER_FONT_SIZE, DEFAULT_GROUP_SIZE, FOLDER_CORNER_RADIUS,
+    FOLDER_PREVIEW_SCALE, FOLDER_TAB_CORNER_RADIUS, FOLDER_TAB_HEIGHT, FOLDER_TAB_WIDTH_RATIO,
+    GROUP_TEXTURE_SCALE, LABEL_BG_EXPANSION, LABEL_FONT_SIZE, LABEL_PADDING, MIN_BLOCK_SIZE,
+    ROW_QUANTIZATION_HEIGHT, UUID_COLOR_LIGHTNESS_MIN, UUID_COLOR_LIGHTNESS_RANGE,
+    UUID_COLOR_SATURATION_MIN, UUID_COLOR_SATURATION_RANGE,
+};
 use crate::image_loader::AnimationFrame;
 use eframe::egui::{self, pos2, vec2, Align2, Color32, FontId, Pos2, Rect, Vec2};
 use std::cmp::Ordering;
 use std::path::Path;
 use std::time::Duration;
 use uuid::Uuid;
-
-/// Internal padding within a block to provide visual separation between the image and its border.
-pub const BLOCK_PADDING: f32 = 4.0;
-/// Minimum size for a block's dimension to ensure it remains interactable and visible.
-pub const MIN_BLOCK_SIZE: f32 = 50.0;
-/// The vertical height used to quantize block positions into rows for sorting and alignment purposes.
-pub const ROW_QUANTIZATION_HEIGHT: f32 = 100.0;
 
 /// Defines the four corners of a block that can be used for resizing.
 #[derive(Clone, Copy, PartialEq)]
@@ -83,15 +88,15 @@ impl BlockControlHover {
 
 /// Calculates the hit-rects for block control buttons (close, chain, counter) based on the block's current rect and zoom.
 pub fn block_control_rects(rect: Rect, zoom: f32) -> (Rect, Rect, Rect) {
-    let btn_size = 16.0 * zoom;
-    let btn_spacing = 4.0 * zoom;
-    let btn_hit_size = btn_size * 1.2;
+    let btn_size = BUTTON_BASE_SIZE * zoom;
+    let btn_spacing = BUTTON_SPACING * zoom;
+    let btn_hit_size = btn_size * BUTTON_HIT_AREA_MULTIPLIER;
 
     let close_rect = Rect::from_center_size(
         rect.right_top()
             + Vec2::new(
-                -btn_hit_size / 2.0 - 4.0 * zoom,
-                btn_hit_size / 2.0 + 4.0 * zoom,
+                -btn_hit_size / 2.0 - BUTTON_SPACING * zoom,
+                btn_hit_size / 2.0 + BUTTON_SPACING * zoom,
             ),
         Vec2::splat(btn_hit_size),
     );
@@ -194,7 +199,7 @@ impl ImageBlock {
         texture: egui::TextureHandle,
         representative_texture: Option<egui::TextureHandle>,
     ) -> Self {
-        let image_size = egui::vec2(160.0, 160.0);
+        let image_size = egui::vec2(DEFAULT_GROUP_SIZE, DEFAULT_GROUP_SIZE);
         let id = Uuid::new_v4();
         let color = color_from_uuid(id);
         Self {
@@ -371,33 +376,37 @@ impl ImageBlock {
             self.image_size * config.zoom,
         );
 
-        let rounding = egui::Rounding::same(6.0 * config.zoom);
+        let rounding = egui::Rounding::same(BLOCK_CORNER_RADIUS * config.zoom);
 
         if self.group.is_group {
             let fill_color = if self.chained || config.is_drop_target {
-                Color32::from_rgb(100, 100, 150)
+                COLOR_CHAINED_GROUP_BG
             } else {
-                Color32::from_rgb(60, 60, 60)
+                COLOR_NORMAL_GROUP_BG
             };
             painter.rect_filled(image_rect, rounding, fill_color);
 
-            let folder_rect = Rect::from_center_size(image_rect.center(), image_rect.size() * 0.9);
+            let folder_rect = Rect::from_center_size(
+                image_rect.center(),
+                image_rect.size() * FOLDER_PREVIEW_SCALE,
+            );
             painter.rect_filled(
                 folder_rect,
-                egui::Rounding::same(2.0 * config.zoom),
+                egui::Rounding::same(FOLDER_CORNER_RADIUS * config.zoom),
                 self.color,
             );
             painter.rect_filled(
                 Rect::from_min_max(
-                    folder_rect.left_top() - vec2(0.0, 5.0 * config.zoom),
-                    folder_rect.left_top() + vec2(folder_rect.width() * 0.4, 0.0),
+                    folder_rect.left_top() - vec2(0.0, FOLDER_TAB_HEIGHT * config.zoom),
+                    folder_rect.left_top()
+                        + vec2(folder_rect.width() * FOLDER_TAB_WIDTH_RATIO, 0.0),
                 ),
-                egui::Rounding::same(1.0 * config.zoom),
+                egui::Rounding::same(FOLDER_TAB_CORNER_RADIUS * config.zoom),
                 self.color,
             );
 
             if let Some(rep_texture) = &self.group.representative_texture {
-                let available_size = image_rect.size() * 0.8;
+                let available_size = image_rect.size() * GROUP_TEXTURE_SCALE;
                 let tex_size = rep_texture.size_vec2();
                 let tex_aspect = tex_size.x / tex_size.y;
                 let available_aspect = available_size.x / available_size.y;
@@ -413,7 +422,7 @@ impl ImageBlock {
                 let tag_rect = Rect::from_center_size(image_rect.center(), tag_size);
                 let mut tag_shape = egui::epaint::RectShape::filled(
                     tag_rect,
-                    egui::Rounding::same(2.0 * config.zoom),
+                    egui::Rounding::same(FOLDER_CORNER_RADIUS * config.zoom),
                     Color32::WHITE,
                 );
                 tag_shape.fill_texture_id = rep_texture.id();
@@ -430,40 +439,40 @@ impl ImageBlock {
 
         if config.show_controls {
             let (close_rect, chain_rect, counter_rect) = block_control_rects(rect, config.zoom);
-            let btn_size = 16.0 * config.zoom;
+            let btn_size = BUTTON_BASE_SIZE * config.zoom;
 
             painter.circle_filled(
                 close_rect.center(),
                 btn_size / 2.0,
                 if config.hover_state.close_hovered {
-                    Color32::from_rgb(255, 100, 100)
+                    COLOR_CLOSE_BUTTON_HOVER
                 } else {
-                    Color32::RED
+                    COLOR_CLOSE_BUTTON
                 },
             );
             painter.text(
                 close_rect.center(),
                 Align2::CENTER_CENTER,
                 "x",
-                FontId::monospace(12.0 * config.zoom),
+                FontId::monospace(BUTTON_ICON_FONT_SIZE * config.zoom),
                 Color32::WHITE,
             );
 
             let chain_color = if self.chained {
-                Color32::GREEN
+                COLOR_CHAIN_ACTIVE
             } else if !config.can_chain {
-                Color32::from_gray(80)
+                COLOR_CHAIN_DISABLED
             } else if config.hover_state.chain_hovered {
-                Color32::LIGHT_GRAY
+                COLOR_CHAIN_HOVER
             } else {
-                Color32::GRAY
+                COLOR_CHAIN_NORMAL
             };
             painter.circle_filled(chain_rect.center(), btn_size / 2.0, chain_color);
             painter.text(
                 chain_rect.center(),
                 Align2::CENTER_CENTER,
                 "o",
-                FontId::monospace(12.0 * config.zoom),
+                FontId::monospace(BUTTON_ICON_FONT_SIZE * config.zoom),
                 Color32::WHITE,
             );
 
@@ -472,37 +481,33 @@ impl ImageBlock {
                     counter_rect.center(),
                     btn_size / 2.0,
                     if config.hover_state.counter_hovered {
-                        Color32::from_rgb(0, 150, 0)
+                        COLOR_COUNTER_BUTTON_HOVER
                     } else {
-                        Color32::from_rgb(0, 100, 0)
+                        COLOR_COUNTER_BUTTON
                     },
                 );
                 painter.text(
                     counter_rect.center(),
                     Align2::CENTER_CENTER,
                     "#",
-                    FontId::monospace(12.0 * config.zoom),
+                    FontId::monospace(BUTTON_ICON_FONT_SIZE * config.zoom),
                     Color32::WHITE,
                 );
             }
         }
 
         if !self.group.is_group && self.counter > 0 {
-            let circle_radius = 15.0 * config.zoom;
+            let circle_radius = COUNTER_BADGE_RADIUS * config.zoom;
             let circle_center = pos2(
-                rect.min.x + circle_radius + 5.0 * config.zoom,
-                rect.min.y + circle_radius + 5.0 * config.zoom,
+                rect.min.x + circle_radius + COUNTER_BADGE_OFFSET * config.zoom,
+                rect.min.y + circle_radius + COUNTER_BADGE_OFFSET * config.zoom,
             );
-            painter.circle_filled(
-                circle_center,
-                circle_radius,
-                Color32::from_rgba_unmultiplied(0, 100, 0, 170),
-            );
+            painter.circle_filled(circle_center, circle_radius, COLOR_COUNTER_BADGE);
             painter.text(
                 circle_center,
                 Align2::CENTER_CENTER,
                 self.counter.to_string(),
-                FontId::proportional(20.0 * config.zoom),
+                FontId::proportional(COUNTER_FONT_SIZE * config.zoom),
                 Color32::WHITE,
             );
         }
@@ -517,18 +522,19 @@ impl ImageBlock {
                     .unwrap_or("unnamed")
             };
 
-            let font_id = FontId::proportional(12.0 * config.zoom);
+            let font_id = FontId::proportional(LABEL_FONT_SIZE * config.zoom);
             let galley = ui
                 .painter()
                 .layout_no_wrap(name.to_string(), font_id, Color32::WHITE);
 
-            let text_pos = image_rect.left_top() + vec2(4.0 * config.zoom, 4.0 * config.zoom);
+            let text_pos = image_rect.left_top()
+                + vec2(LABEL_PADDING * config.zoom, LABEL_PADDING * config.zoom);
             let text_rect = Rect::from_min_size(text_pos, galley.size());
 
             painter.rect_filled(
-                text_rect.expand(2.0 * config.zoom),
-                egui::Rounding::same(2.0 * config.zoom),
-                Color32::from_black_alpha(180),
+                text_rect.expand(LABEL_BG_EXPANSION * config.zoom),
+                egui::Rounding::same(FOLDER_CORNER_RADIUS * config.zoom),
+                Color32::from_black_alpha(COLOR_LABEL_BG_ALPHA),
             );
             painter.galley(text_pos, galley, Color32::WHITE);
         }
@@ -614,7 +620,7 @@ fn color_from_uuid(id: Uuid) -> egui::Color32 {
     let b = id.as_bytes();
     // Generate a vibrant color from the UUID bytes
     let h = (b[0] as f32 + b[1] as f32 * 256.0) / 65535.0;
-    let s = 0.6 + (b[2] as f32 / 255.0) * 0.4;
-    let l = 0.5 + (b[3] as f32 / 255.0) * 0.2;
+    let s = UUID_COLOR_SATURATION_MIN + (b[2] as f32 / 255.0) * UUID_COLOR_SATURATION_RANGE;
+    let l = UUID_COLOR_LIGHTNESS_MIN + (b[3] as f32 / 255.0) * UUID_COLOR_LIGHTNESS_RANGE;
     egui::Color32::from(egui::epaint::Hsva::new(h, s, l, 1.0))
 }
