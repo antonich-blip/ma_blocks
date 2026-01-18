@@ -51,9 +51,7 @@ Low Priority
 - Some type annotations could be more explicit
 ---
 Recommended Action Plan
-1. Create constants module - Quick win for all magic numbers/colors
-2. Extract MaBlocksApp methods - Break down large methods into smaller focused ones
-3. Create block lookup helper - Reduce duplication of ID-based searches
+1. Create block lookup helper - Reduce duplication of ID-based searches
 4. Add BlockManager abstraction - Consolidate block CRUD and chaining operations
 5. Extract session management - Separate persistence from UI logic
 6. Add tests - Required before major refactoring

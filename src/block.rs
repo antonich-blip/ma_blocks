@@ -541,6 +541,11 @@ impl ImageBlock {
     }
 }
 
+/// Returns the index of a block by its ID within a slice, or None if not found.
+pub fn block_index_in_slice(blocks: &[ImageBlock], id: Uuid) -> Option<usize> {
+    blocks.iter().position(|b| b.id == id)
+}
+
 /// Handles the resizing logic for a set of blocks based on pointer movement and the current resizing state.
 pub fn handle_blocks_resizing(
     blocks: &mut [ImageBlock],
@@ -548,7 +553,7 @@ pub fn handle_blocks_resizing(
     curr_mouse_pos: Pos2,
     zoom: f32,
 ) {
-    if let Some(idx) = blocks.iter().position(|b| b.id == resizing_state.id) {
+    if let Some(idx) = block_index_in_slice(blocks, resizing_state.id) {
         let delta_world = (curr_mouse_pos - resizing_state.initial_mouse_pos) / zoom;
         let original_center = resizing_state.initial_block_rect.center();
         let min_size = MIN_BLOCK_SIZE;

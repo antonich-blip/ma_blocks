@@ -131,6 +131,29 @@ struct MaBlocksApp {
 }
 
 impl MaBlocksApp {
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Block Lookup Helpers
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// Returns the index of a block by its ID, or None if not found.
+    fn block_index(&self, id: Uuid) -> Option<usize> {
+        self.blocks.iter().position(|b| b.id == id)
+    }
+
+    /// Returns an immutable reference to a block by its ID, or None if not found.
+    fn block_by_id(&self, id: Uuid) -> Option<&ImageBlock> {
+        self.blocks.iter().find(|b| b.id == id)
+    }
+
+    /// Returns a mutable reference to a block by its ID, or None if not found.
+    fn block_by_id_mut(&mut self, id: Uuid) -> Option<&mut ImageBlock> {
+        self.blocks.iter_mut().find(|b| b.id == id)
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Initialization
+    // ─────────────────────────────────────────────────────────────────────────────
+
     /// Initializes the application state, sets up channels, and discovers project directories.
     fn new() -> Self {
         let (tx, rx) = channel();
@@ -235,7 +258,7 @@ impl MaBlocksApp {
             if got_any {
                 if !added_ids.is_empty() && current_max_h > 0.0 {
                     for id in added_ids {
-                        if let Some(block) = self.blocks.iter_mut().find(|b| b.id == id) {
+                        if let Some(block) = self.block_by_id_mut(id) {
                             let aspect_ratio = block.aspect_ratio;
                             block.set_preferred_size(vec2(
                                 current_max_h * aspect_ratio,
@@ -263,7 +286,7 @@ impl MaBlocksApp {
     }
 
     fn purge_animation_frames(&mut self, id: Uuid) {
-        if let Some(block) = self.blocks.iter_mut().find(|b| b.id == id) {
+        if let Some(block) = self.block_by_id_mut(id) {
             if block.is_full_sequence && block.anim.frames.len() > 1 {
                 block.anim.frames.truncate(1);
                 block.is_full_sequence = false;
@@ -527,8 +550,8 @@ impl MaBlocksApp {
                 .map(|b| b.id)
                 .collect();
             for id in chained_ids {
-                if let Some(b_idx) = self.blocks.iter().position(|b| b.id == id) {
-                    if let Some(t_idx) = self.blocks.iter().position(|b| b.id == box_id) {
+                if let Some(b_idx) = self.block_index(id) {
+                    if let Some(t_idx) = self.block_index(box_id) {
                         self.move_single_block_into_box(b_idx, t_idx);
                     }
                 }
@@ -585,7 +608,7 @@ impl MaBlocksApp {
             return false;
         };
 
-        let Some(idx) = self.blocks.iter().position(|b| b.id == last_id) else {
+        let Some(idx) = self.block_index(last_id) else {
             return false;
         };
 
@@ -864,7 +887,7 @@ impl MaBlocksApp {
                     let block_ids: Vec<_> = self.blocks.iter().map(|b| b.id).collect();
 
                     for id in block_ids {
-                        let Some(index) = self.blocks.iter().position(|b| b.id == id) else {
+                        let Some(index) = self.block_index(id) else {
                             continue;
                         };
 
@@ -1243,12 +1266,12 @@ impl MaBlocksApp {
         hovered_box: Option<(Uuid, Rect, BlockRenderConfig)>,
     ) {
         for (id, rect, config) in dragging_blocks {
-            if let Some(block) = self.blocks.iter().find(|b| b.id == *id) {
+            if let Some(block) = self.block_by_id(*id) {
                 block.render(ui, *rect, *config);
             }
         }
         if let Some((id, rect, mut config)) = hovered_box {
-            if let Some(block) = self.blocks.iter().find(|b| b.id == id) {
+            if let Some(block) = self.block_by_id(id) {
                 config.is_drop_target = true;
                 block.render(ui, rect, config);
             }
