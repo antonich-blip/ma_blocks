@@ -239,6 +239,11 @@ impl ImageBlock {
         Rect::from_min_size(self.pos.position, self.outer_size())
     }
 
+    /// Returns the drag offset for this block.
+    pub fn drag_offset(&self) -> Vec2 {
+        self.pos.drag_offset
+    }
+
     /// Returns the total size of the block including internal padding.
     pub fn outer_size(&self) -> Vec2 {
         egui::vec2(

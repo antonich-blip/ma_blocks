@@ -1,4 +1,5 @@
 mod block;
+mod block_manager;
 mod constants;
 mod image_loader;
 mod paths;
@@ -7,24 +8,22 @@ use block::{
     block_control_rects, handle_blocks_resizing, BlockControlHover, BlockRenderConfig, ImageBlock,
     InteractionState, ResizeHandle,
 };
+use block_manager::{BlockManager, ChainedIds};
 use constants::{
-    ALIGN_SPACING, BLOCK_PADDING, CANVAS_PADDING, CANVAS_WORKING_WIDTH, COLOR_GROUP_PLACEHOLDER,
-    COLOR_TOOLBAR_BG, INITIAL_WINDOW_HEIGHT, INITIAL_WINDOW_WIDTH, MAX_BLOCK_DIMENSION,
-    MAX_CACHED_ANIMATIONS, MIN_CANVAS_INNER_WIDTH, ROW_QUANTIZATION_HEIGHT, TOOLBAR_BUTTON_SIZE,
-    TOOLBAR_ICON_SIZE, TOOLBAR_START_SPACING,
+    CANVAS_PADDING, CANVAS_WORKING_WIDTH, COLOR_GROUP_PLACEHOLDER, COLOR_TOOLBAR_BG,
+    INITIAL_WINDOW_HEIGHT, INITIAL_WINDOW_WIDTH, MAX_BLOCK_DIMENSION, MIN_CANVAS_INNER_WIDTH,
+    TOOLBAR_BUTTON_SIZE, TOOLBAR_ICON_SIZE, TOOLBAR_START_SPACING,
 };
 use eframe::egui::{self, Color32, Pos2, Rect, RichText, Sense, UiBuilder, Vec2};
 use egui::{pos2, vec2};
 use paths::AppPaths;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+
 use std::path::{Path, PathBuf};
 
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Duration;
 use uuid::Uuid;
-
-type ChainedIds = HashSet<Uuid>;
 
 fn main() -> eframe::Result<()> {
     env_logger::init();
@@ -111,8 +110,7 @@ impl InputSnapshot {
 
 /// The main application state holding all blocks, UI interaction states, and resource management.
 struct MaBlocksApp {
-    blocks: Vec<ImageBlock>,
-    next_block_id: usize,
+    block_manager: BlockManager,
     resizing_state: Option<InteractionState>,
     skip_chain_cancel: bool,
     working_inner_width: f32,
@@ -122,32 +120,39 @@ struct MaBlocksApp {
     last_boxed_id: Option<Uuid>,
     show_file_names: bool,
     hovered_box_id: Option<Uuid>,
-    remembered_chains: Vec<ChainedIds>,
     image_rx: Option<Receiver<image_loader::ImageLoadResponse>>,
     image_tx: Sender<image_loader::ImageLoadResponse>,
-    /// Tracks the order in which animations were last accessed (played)
-    animation_access_order: Vec<Uuid>,
     paths: Option<AppPaths>,
 }
 
 impl MaBlocksApp {
     // ─────────────────────────────────────────────────────────────────────────────
-    // Block Lookup Helpers
+    // Block Lookup Helpers (delegate to BlockManager)
     // ─────────────────────────────────────────────────────────────────────────────
 
     /// Returns the index of a block by its ID, or None if not found.
     fn block_index(&self, id: Uuid) -> Option<usize> {
-        self.blocks.iter().position(|b| b.id == id)
+        self.block_manager.index_of(id)
     }
 
     /// Returns an immutable reference to a block by its ID, or None if not found.
     fn block_by_id(&self, id: Uuid) -> Option<&ImageBlock> {
-        self.blocks.iter().find(|b| b.id == id)
+        self.block_manager.get(id)
     }
 
     /// Returns a mutable reference to a block by its ID, or None if not found.
     fn block_by_id_mut(&mut self, id: Uuid) -> Option<&mut ImageBlock> {
-        self.blocks.iter_mut().find(|b| b.id == id)
+        self.block_manager.get_mut(id)
+    }
+
+    /// Returns a reference to the blocks slice.
+    fn blocks(&self) -> &[ImageBlock] {
+        self.block_manager.blocks()
+    }
+
+    /// Returns a mutable reference to the blocks slice.
+    fn blocks_mut(&mut self) -> &mut [ImageBlock] {
+        self.block_manager.blocks_mut()
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -164,8 +169,7 @@ impl MaBlocksApp {
             }
         }
         Self {
-            blocks: Vec::new(),
-            next_block_id: 0,
+            block_manager: BlockManager::new(),
             resizing_state: None,
             skip_chain_cancel: false,
             working_inner_width: CANVAS_WORKING_WIDTH,
@@ -174,11 +178,9 @@ impl MaBlocksApp {
             last_unboxed_ids: Vec::new(),
             last_boxed_id: None,
             show_file_names: false,
-            remembered_chains: Vec::new(),
             hovered_box_id: None,
             image_rx: Some(rx),
             image_tx: tx,
-            animation_access_order: Vec::new(),
             paths,
         }
     }
@@ -220,7 +222,7 @@ impl MaBlocksApp {
             let mut added_ids = Vec::new();
 
             // Calculate max height of EXISTING blocks before adding new ones
-            let current_max_h = self.get_max_block_height();
+            let current_max_h = self.block_manager.max_block_height();
 
             while let Ok(result) = rx.try_recv() {
                 match result {
@@ -229,7 +231,7 @@ impl MaBlocksApp {
                         let mut update_id = None;
                         if is_full {
                             let path_str = path.to_string_lossy().into_owned();
-                            for block in &mut self.blocks {
+                            for block in self.blocks_mut() {
                                 if block.path == path_str && !block.is_full_sequence {
                                     block.anim.frames = std::mem::take(&mut loaded.frames);
                                     block.is_full_sequence = true;
@@ -241,7 +243,7 @@ impl MaBlocksApp {
                         }
 
                         if let Some(id) = update_id {
-                            self.mark_animation_used(id);
+                            self.block_manager.mark_animation_used(id);
                         } else {
                             match self.insert_loaded_image(ctx, path, loaded, is_full) {
                                 Ok(id) => added_ids.push(id),
@@ -273,28 +275,6 @@ impl MaBlocksApp {
         }
     }
 
-    fn mark_animation_used(&mut self, id: Uuid) {
-        // Remove if exists and push to back (most recent)
-        self.animation_access_order.retain(|&x| x != id);
-        self.animation_access_order.push(id);
-
-        // If we exceed cache size, purge the oldest (front)
-        if self.animation_access_order.len() > MAX_CACHED_ANIMATIONS {
-            let to_purge_id = self.animation_access_order.remove(0);
-            self.purge_animation_frames(to_purge_id);
-        }
-    }
-
-    fn purge_animation_frames(&mut self, id: Uuid) {
-        if let Some(block) = self.block_by_id_mut(id) {
-            if block.is_full_sequence && block.anim.frames.len() > 1 {
-                block.anim.frames.truncate(1);
-                block.is_full_sequence = false;
-                block.stop_animation();
-            }
-        }
-    }
-
     fn create_block_from_loaded(
         &mut self,
         ctx: &egui::Context,
@@ -309,13 +289,12 @@ impl MaBlocksApp {
             ));
         }
 
-        let texture_label = format!("block-texture-{}", self.next_block_id);
+        let texture_label = format!("block-texture-{}", self.block_manager.allocate_block_id());
         let texture = ctx.load_texture(
             texture_label,
             loaded.frames[0].image.clone(),
             egui::TextureOptions::LINEAR,
         );
-        self.next_block_id += 1;
 
         let image_size = scaled_size(loaded.original_size);
         let mut block = ImageBlock::new(
@@ -339,10 +318,10 @@ impl MaBlocksApp {
     ) -> Result<Uuid, String> {
         let block = self.create_block_from_loaded(ctx, path, loaded, is_full)?;
         let id = block.id;
-        self.blocks.push(block);
+        self.block_manager.push(block);
 
         if is_full {
-            self.mark_animation_used(id);
+            self.block_manager.mark_animation_used(id);
         }
 
         Ok(id)
@@ -351,7 +330,7 @@ impl MaBlocksApp {
     fn advance_animations(&mut self, dt: f32, ctx: &egui::Context) {
         let mut changed = false;
         let mut next_frame_in: Option<Duration> = None;
-        for block in &mut self.blocks {
+        for block in self.blocks_mut() {
             if block.update_animation(dt) {
                 changed = true;
             }
@@ -370,215 +349,39 @@ impl MaBlocksApp {
         }
     }
 
-    /// Recalculates the positions of all blocks to fit within the current canvas width while respecting groups and alignment.
+    /// Recalculates the positions of all blocks to fit within the current canvas width.
     fn reflow_blocks(&mut self) {
-        let inner_width = self.working_inner_width.max(MIN_CANVAS_INNER_WIDTH);
-        let row_limit = CANVAS_PADDING + inner_width;
-        let max_image_width = (inner_width - BLOCK_PADDING * 2.0).max(1.0);
-
-        for block in &mut self.blocks {
-            block.reset_to_preferred_size();
-            block.constrain_to_width(max_image_width);
-        }
-
-        let mut cursor = vec2(CANVAS_PADDING, CANVAS_PADDING);
-        let mut row_height = 0.0;
-        let mut prev_is_group = None;
-
-        for block in &mut self.blocks {
-            if let Some(prev) = prev_is_group {
-                if prev != block.group.is_group && cursor.x > CANVAS_PADDING {
-                    cursor.x = CANVAS_PADDING;
-                    cursor.y += row_height + ALIGN_SPACING;
-                    row_height = 0.0;
-                }
-            }
-            prev_is_group = Some(block.group.is_group);
-
-            let size = block.outer_size();
-            if cursor.x + size.x > row_limit {
-                cursor.x = CANVAS_PADDING;
-                cursor.y += row_height + ALIGN_SPACING;
-                row_height = 0.0;
-            }
-
-            block.pos.position = pos2(cursor.x, cursor.y);
-            cursor.x += size.x + ALIGN_SPACING;
-            row_height = row_height.max(size.y);
-        }
-    }
-
-    fn get_max_block_height(&self) -> f32 {
-        self.blocks
-            .iter()
-            .filter(|b| !b.group.is_group)
-            .map(|b| b.preferred_image_size.y)
-            .fold(0.0, |a, b| a.max(b))
+        self.block_manager.reflow(self.working_inner_width);
     }
 
     fn can_chain(&self) -> bool {
-        !self.blocks.is_empty()
-    }
-
-    fn enforce_chain_constraints(&mut self) {
-        if self.blocks.is_empty() {
-            self.clear_chain_group();
-        }
+        self.block_manager.can_chain()
     }
 
     fn clear_chain_group(&mut self) {
-        let chained_ids: ChainedIds = self
-            .blocks
-            .iter()
-            .filter(|b| b.chained)
-            .map(|b| b.id)
-            .collect();
-
-        if chained_ids.len() >= 2 {
-            self.remembered_chains
-                .retain(|chain| chain.is_disjoint(&chained_ids));
-            self.remembered_chains.push(chained_ids);
-        }
-
-        for block in &mut self.blocks {
-            block.chained = false;
-        }
+        self.block_manager.clear_chain_group();
         self.skip_chain_cancel = false;
     }
 
     fn toggle_chain_for_block(&mut self, index: usize) {
-        if !self.can_chain() && !self.blocks[index].group.is_group {
-            return;
-        }
-
-        let block_id = self.blocks[index].id;
-        let was_chained = self.blocks[index].chained;
-
-        if !was_chained {
-            let remembered_chain = self
-                .remembered_chains
-                .iter()
-                .find(|chain| chain.contains(&block_id))
-                .cloned();
-
-            if let Some(chain_ids) = remembered_chain {
-                for block in &mut self.blocks {
-                    if chain_ids.contains(&block.id) {
-                        block.chained = true;
-                    }
-                }
-            } else {
-                self.blocks[index].chained = true;
-            }
-        } else {
-            self.blocks[index].chained = false;
-        }
-
+        self.block_manager.toggle_chain(index);
         self.skip_chain_cancel = true;
     }
 
     /// Combines all currently chained blocks into a single group block.
     fn box_group(&mut self, ctx: &egui::Context) -> Uuid {
-        let mut chained_indices: Vec<usize> = self
-            .blocks
-            .iter()
-            .enumerate()
-            .filter(|(_, b)| b.chained)
-            .map(|(i, _)| i)
-            .collect();
-
-        if chained_indices.is_empty() {
-            return Uuid::nil();
-        }
-
-        chained_indices.sort_by(|a, b| b.cmp(a));
-
-        let mut children = Vec::new();
-        let mut min_pos = pos2(f32::MAX, f32::MAX);
-        for &idx in &chained_indices {
-            let block = self.blocks.remove(idx);
-            min_pos.x = min_pos.x.min(block.pos.position.x);
-            min_pos.y = min_pos.y.min(block.pos.position.y);
-            children.push(block);
-        }
-        children.reverse();
-
-        let texture = ctx.load_texture(
-            format!("group-texture-{}", self.next_block_id),
-            egui::ColorImage::new([1, 1], COLOR_GROUP_PLACEHOLDER),
-            egui::TextureOptions::LINEAR,
-        );
-        self.next_block_id += 1;
-
-        let representative_texture = children.first().map(|c| c.texture.clone());
-
-        let mut group_block =
-            ImageBlock::new_group(String::new(), children, texture, representative_texture);
-        group_block.update_group_name();
-        group_block.pos.position = min_pos;
-        let new_id = group_block.id;
-        self.blocks.insert(0, group_block);
+        let new_id = self.block_manager.box_chained(ctx);
         self.reflow_blocks();
         new_id
     }
 
     fn unbox_group(&mut self, index: usize) {
-        let group = self.blocks.remove(index);
-        if group.group.is_group {
-            let insert_idx = self
-                .blocks
-                .iter()
-                .position(|b| !b.group.is_group)
-                .unwrap_or(self.blocks.len());
-            for (i, mut child) in group.group.children.into_iter().enumerate() {
-                child.chained = false;
-                self.blocks.insert(insert_idx + i, child);
-            }
-        }
+        self.block_manager.unbox_group(index);
         self.reflow_blocks();
     }
 
     fn drop_block_into_box(&mut self, block_idx: usize, box_idx: usize) {
-        let is_chained = self.blocks[block_idx].chained;
-        let box_id = self.blocks[box_idx].id;
-
-        if is_chained {
-            let chained_ids: Vec<Uuid> = self
-                .blocks
-                .iter()
-                .filter(|b| b.chained)
-                .map(|b| b.id)
-                .collect();
-            for id in chained_ids {
-                if let Some(b_idx) = self.block_index(id) {
-                    if let Some(t_idx) = self.block_index(box_id) {
-                        self.move_single_block_into_box(b_idx, t_idx);
-                    }
-                }
-            }
-        } else {
-            self.move_single_block_into_box(block_idx, box_idx);
-        }
-    }
-
-    fn move_single_block_into_box(&mut self, block_idx: usize, box_idx: usize) {
-        let mut block = self.blocks.remove(block_idx);
-        block.pos.is_dragging = false;
-        block.chained = false;
-
-        let target_box_idx = if box_idx > block_idx {
-            box_idx - 1
-        } else {
-            box_idx
-        };
-        let box_block = &mut self.blocks[target_box_idx];
-
-        if box_block.group.representative_texture.is_none() {
-            box_block.group.representative_texture = Some(block.texture.clone());
-        }
-
-        box_block.group.children.push(block);
-        box_block.update_group_name();
+        self.block_manager.drop_into_group(block_idx, box_idx);
     }
 
     /// Attempts to re-box previously unboxed blocks. Returns true if action was taken.
@@ -588,8 +391,9 @@ impl MaBlocksApp {
         }
 
         let mut found_any = false;
-        for block in &mut self.blocks {
-            if self.last_unboxed_ids.contains(&block.id) {
+        let last_unboxed_ids = self.last_unboxed_ids.clone();
+        for block in self.blocks_mut() {
+            if last_unboxed_ids.contains(&block.id) {
                 block.chained = true;
                 found_any = true;
             }
@@ -612,12 +416,11 @@ impl MaBlocksApp {
             return false;
         };
 
-        self.last_unboxed_ids = self.blocks[idx]
-            .group
-            .children
-            .iter()
-            .map(|c| c.id)
-            .collect();
+        self.last_unboxed_ids = self
+            .block_manager
+            .get_by_index(idx)
+            .map(|b| b.group.children.iter().map(|c| c.id).collect())
+            .unwrap_or_default();
         self.unbox_group(idx);
         self.last_boxed_id = None;
         true
@@ -626,7 +429,7 @@ impl MaBlocksApp {
     /// Unboxes a single chained group block.
     fn unbox_single_chained_group(&mut self) -> bool {
         let chained_groups: Vec<_> = self
-            .blocks
+            .blocks()
             .iter()
             .enumerate()
             .filter(|(_, b)| b.chained && b.group.is_group)
@@ -637,19 +440,18 @@ impl MaBlocksApp {
         }
 
         let idx = chained_groups[0].0;
-        self.last_unboxed_ids = self.blocks[idx]
-            .group
-            .children
-            .iter()
-            .map(|c| c.id)
-            .collect();
+        self.last_unboxed_ids = self
+            .block_manager
+            .get_by_index(idx)
+            .map(|b| b.group.children.iter().map(|c| c.id).collect())
+            .unwrap_or_default();
         self.unbox_group(idx);
         self.last_boxed_id = None;
         true
     }
 
     fn toggle_compact_group(&mut self, ctx: &egui::Context) {
-        let chained_count = self.blocks.iter().filter(|b| b.chained).count();
+        let chained_count = self.block_manager.chained_count();
 
         // No blocks chained - try to restore previous state
         if chained_count == 0 {
@@ -675,100 +477,8 @@ impl MaBlocksApp {
     }
 
     fn reorder_and_reflow(&mut self, leader_id: Option<Uuid>) {
-        if let Some(leader_id) = leader_id {
-            let is_leader_chained = self
-                .blocks
-                .iter()
-                .find(|b| b.id == leader_id)
-                .map(|b| b.chained)
-                .unwrap_or(false);
-
-            let mut moved_group = Vec::new();
-            let mut remaining = Vec::new();
-
-            let leader_idx_in_group = self
-                .blocks
-                .iter()
-                .enumerate()
-                .find(|(_, b)| b.id == leader_id)
-                .map(|(i, _)| i);
-
-            if leader_idx_in_group.is_none() {
-                return;
-            }
-
-            for block in self.blocks.drain(..) {
-                let is_moved = if is_leader_chained {
-                    block.chained
-                } else {
-                    block.id == leader_id
-                };
-
-                if is_moved {
-                    moved_group.push(block);
-                } else {
-                    remaining.push(block);
-                }
-            }
-
-            if moved_group.is_empty() {
-                self.blocks = remaining;
-                self.reflow_blocks();
-                return;
-            }
-
-            remaining.sort_by(|a, b| a.cmp_layout(b));
-
-            let leader_pos = moved_group
-                .iter()
-                .find(|b| b.id == leader_id)
-                .unwrap()
-                .pos
-                .position;
-            let is_leader_group = moved_group[0].group.is_group;
-
-            let group_boundary = remaining
-                .iter()
-                .position(|b| !b.group.is_group)
-                .unwrap_or(remaining.len());
-
-            let mut insert_idx;
-            if is_leader_group {
-                insert_idx = group_boundary;
-                for (i, b) in remaining[..group_boundary].iter().enumerate() {
-                    let b_y_q = (b.pos.position.y / ROW_QUANTIZATION_HEIGHT) as i32;
-                    let leader_y_q = (leader_pos.y / ROW_QUANTIZATION_HEIGHT) as i32;
-
-                    if leader_y_q < b_y_q
-                        || (leader_y_q == b_y_q && leader_pos.x < b.pos.position.x)
-                    {
-                        insert_idx = i;
-                        break;
-                    }
-                }
-            } else {
-                insert_idx = remaining.len();
-                for (i, b) in remaining[group_boundary..].iter().enumerate() {
-                    let b_y_q = (b.pos.position.y / ROW_QUANTIZATION_HEIGHT) as i32;
-                    let leader_y_q = (leader_pos.y / ROW_QUANTIZATION_HEIGHT) as i32;
-
-                    if leader_y_q < b_y_q
-                        || (leader_y_q == b_y_q && leader_pos.x < b.pos.position.x)
-                    {
-                        insert_idx = group_boundary + i;
-                        break;
-                    }
-                }
-            }
-
-            self.blocks = remaining;
-            for (i, block) in moved_group.into_iter().enumerate() {
-                self.blocks.insert(insert_idx + i, block);
-            }
-        } else {
-            self.blocks.sort_by(|a, b| a.cmp_layout(b));
-        }
-        self.reflow_blocks();
+        self.block_manager
+            .reorder_and_reflow(leader_id, self.working_inner_width);
     }
 }
 
@@ -781,7 +491,7 @@ impl eframe::App for MaBlocksApp {
 
         let dt = ctx.input(|i| i.unstable_dt).max(0.0);
         self.advance_animations(dt, ctx);
-        self.enforce_chain_constraints();
+        self.block_manager.enforce_chain_constraints();
 
         self.render_toolbar(ctx);
 
@@ -853,8 +563,9 @@ impl MaBlocksApp {
             }
 
             if let Some(curr_mouse_pos) = input.hover_pos {
-                if let Some(state) = &self.resizing_state {
-                    handle_blocks_resizing(&mut self.blocks, state, curr_mouse_pos, self.zoom);
+                if let Some(state) = self.resizing_state.clone() {
+                    let zoom = self.zoom;
+                    handle_blocks_resizing(self.blocks_mut(), &state, curr_mouse_pos, zoom);
                 }
             }
 
@@ -883,21 +594,21 @@ impl MaBlocksApp {
                     let mut hovered_box_to_render = None;
                     let mut dragging_blocks_to_render = Vec::new();
 
-                    let is_any_dragging = self.blocks.iter().any(|b| b.pos.is_dragging);
-                    let block_ids: Vec<_> = self.blocks.iter().map(|b| b.id).collect();
+                    let is_any_dragging = self.block_manager.any_dragging();
+                    let block_ids: Vec<_> = self.block_manager.block_ids().collect();
 
                     for id in block_ids {
                         let Some(index) = self.block_index(id) else {
                             continue;
                         };
 
+                        let block = self.block_manager.get_by_index(index).unwrap();
                         let block_rect = Rect::from_min_size(
-                            self.blocks[index].pos.position * zoom,
-                            self.blocks[index].outer_size() * zoom,
+                            block.pos.position * zoom,
+                            block.outer_size() * zoom,
                         )
                         .translate(canvas_origin.to_vec2());
 
-                        let block = &self.blocks[index];
                         let rects = block_control_rects(block_rect, zoom);
                         let block_id = canvas_ui.id().with(id);
                         let is_hovering_block =
@@ -953,14 +664,14 @@ impl MaBlocksApp {
                             }
                         }
 
-                        let show_controls = is_hovering_block
-                            || self.blocks[index].pos.is_dragging
-                            || self.blocks[index].chained;
+                        let block = self.block_manager.get_by_index(index).unwrap();
+                        let show_controls =
+                            is_hovering_block || block.pos.is_dragging || block.chained;
 
                         let is_hovered_box = Some(id) == self.hovered_box_id;
                         let should_render_on_top = is_hovered_box
-                            || self.blocks[index].pos.is_dragging
-                            || (is_any_dragging && self.blocks[index].chained);
+                            || block.pos.is_dragging
+                            || (is_any_dragging && block.chained);
 
                         let config = BlockRenderConfig {
                             zoom,
@@ -972,14 +683,12 @@ impl MaBlocksApp {
                         };
 
                         if !should_render_on_top {
-                            self.blocks[index].render(&mut canvas_ui, block_rect, config);
+                            block.render(&mut canvas_ui, block_rect, config);
                         }
 
                         if is_hovered_box {
                             hovered_box_to_render = Some((id, block_rect, config));
-                        } else if self.blocks[index].pos.is_dragging
-                            || (is_any_dragging && self.blocks[index].chained)
-                        {
+                        } else if block.pos.is_dragging || (is_any_dragging && block.chained) {
                             dragging_blocks_to_render.push((id, block_rect, config));
                         }
 
@@ -992,8 +701,7 @@ impl MaBlocksApp {
                         }
 
                         if remove {
-                            self.animation_access_order.retain(|&x| x != id);
-                            self.blocks.remove(index);
+                            self.block_manager.remove(index);
                             should_reflow = true;
                         }
                     }
@@ -1035,7 +743,7 @@ impl MaBlocksApp {
     fn calculate_canvas_size(&self, available_height: f32) -> Vec2 {
         let zoom = self.zoom;
         let content_height = self
-            .blocks
+            .blocks()
             .iter()
             .map(|b| b.pos.position.y + b.outer_size().y)
             .fold(0.0, |a: f32, b| a.max(b));
@@ -1052,23 +760,26 @@ impl MaBlocksApp {
     fn update_drop_target(&mut self, input: &InputSnapshot, canvas_origin: Pos2, zoom: f32) {
         self.hovered_box_id = None;
 
-        let Some(dragging_idx) = self.blocks.iter().position(|b| b.pos.is_dragging) else {
+        let Some(dragging_idx) = self.blocks().iter().position(|b| b.pos.is_dragging) else {
             return;
         };
 
-        if self.blocks[dragging_idx].group.is_group {
+        let dragging_block = self.block_manager.get_by_index(dragging_idx).unwrap();
+        if dragging_block.group.is_group {
             return;
         }
+        let dragging_id = dragging_block.id;
 
         let Some(m_pos) = input.interact_pos else {
             return;
         };
 
         let world_mouse = (m_pos - canvas_origin) / zoom;
-        if let Some(target_idx) =
-            self.find_group_at_pos(world_mouse.to_pos2(), self.blocks[dragging_idx].id)
+        if let Some(target_idx) = self
+            .block_manager
+            .find_group_at_pos(world_mouse.to_pos2(), dragging_id)
         {
-            self.hovered_box_id = Some(self.blocks[target_idx].id);
+            self.hovered_box_id = self.block_manager.get_by_index(target_idx).map(|b| b.id);
         }
     }
 
@@ -1093,7 +804,7 @@ impl MaBlocksApp {
 
         let world_click = (click_pos - canvas_origin) / zoom;
         let hit_block = self
-            .blocks
+            .blocks()
             .iter()
             .any(|b| b.rect().contains(world_click.to_pos2()));
 
@@ -1109,7 +820,7 @@ impl MaBlocksApp {
             return;
         }
 
-        let block = &mut self.blocks[index];
+        let block = self.block_manager.get_by_index(index).unwrap();
         if !block.anim.has_animation {
             return;
         }
@@ -1118,10 +829,11 @@ impl MaBlocksApp {
             let path = PathBuf::from(&block.path);
             self.trigger_image_load(path, false);
         } else {
-            self.blocks[index].toggle_animation();
-            if self.blocks[index].anim.animation_enabled {
-                let id = self.blocks[index].id;
-                self.mark_animation_used(id);
+            let block = self.block_manager.get_by_index_mut(index).unwrap();
+            block.toggle_animation();
+            if block.anim.animation_enabled {
+                let id = block.id;
+                self.block_manager.mark_animation_used(id);
             }
         }
     }
@@ -1143,20 +855,22 @@ impl MaBlocksApp {
             if hover_state.chain_hovered {
                 self.toggle_chain_for_block(index);
             } else if hover_state.counter_hovered {
-                self.blocks[index].counter += 1;
+                self.block_manager.get_by_index_mut(index).unwrap().counter += 1;
                 skip_chain_cancel = true;
             }
         }
 
         if input.secondary_clicked && hover_state.counter_hovered {
-            self.blocks[index].counter = (self.blocks[index].counter - 1).max(0);
+            let block = self.block_manager.get_by_index_mut(index).unwrap();
+            block.counter = (block.counter - 1).max(0);
             skip_chain_cancel = true;
         }
 
         if input.secondary_pressed && is_hovering_block && !any_button_hovered {
             if let Some(m_pos) = input.hover_pos {
+                let block = self.block_manager.get_by_index(index).unwrap();
                 let world_mouse = (m_pos - canvas_origin) / zoom;
-                let center = self.blocks[index].rect().center();
+                let center = block.rect().center();
                 let handle = match (world_mouse.x < center.x, world_mouse.y < center.y) {
                     (true, true) => ResizeHandle::TopLeft,
                     (false, true) => ResizeHandle::TopRight,
@@ -1164,10 +878,10 @@ impl MaBlocksApp {
                     (false, false) => ResizeHandle::BottomRight,
                 };
                 self.resizing_state = Some(InteractionState {
-                    id: self.blocks[index].id,
+                    id: block.id,
                     handle,
                     initial_mouse_pos: m_pos,
-                    initial_block_rect: self.blocks[index].rect(),
+                    initial_block_rect: block.rect(),
                 });
             }
         }
@@ -1188,14 +902,17 @@ impl MaBlocksApp {
 
         if response.drag_started_by(egui::PointerButton::Primary) {
             if let Some(pointer) = response.interact_pointer_pos() {
-                let block = &mut self.blocks[index];
+                let block = self.block_manager.get_by_index_mut(index).unwrap();
                 block.pos.drag_offset = (pointer - canvas_origin) / zoom
                     - vec2(block.pos.position.x, block.pos.position.y);
                 block.pos.is_dragging = true;
             }
         }
 
-        if self.blocks[index].pos.is_dragging && response.dragged_by(egui::PointerButton::Primary) {
+        let block = self.block_manager.get_by_index(index).unwrap();
+        let is_dragging = block.pos.is_dragging;
+
+        if is_dragging && response.dragged_by(egui::PointerButton::Primary) {
             if let Some(pointer) = response.interact_pointer_pos() {
                 let viewport = ui.clip_rect();
                 let mut scroll_delta = 0.0;
@@ -1210,19 +927,24 @@ impl MaBlocksApp {
                     ui.ctx().request_repaint();
                 }
 
-                let old_pos = self.blocks[index].pos.position;
+                let block = self.block_manager.get_by_index(index).unwrap();
+                let old_pos = block.pos.position;
+                let drag_offset = block.drag_offset();
+                let is_chained = block.chained;
+                let leader_id = block.id;
+
                 let current_canvas_origin = canvas_origin + vec2(0.0, scroll_delta);
-                let new_pos =
-                    (pointer - current_canvas_origin) / zoom - self.blocks[index].pos.drag_offset;
+                let new_pos = (pointer - current_canvas_origin) / zoom - drag_offset;
                 let delta = pos2(new_pos.x, new_pos.y) - old_pos;
 
-                let is_chained = self.blocks[index].chained;
-                let leader_id = self.blocks[index].id;
-
-                self.blocks[index].pos.position = pos2(new_pos.x, new_pos.y);
+                self.block_manager
+                    .get_by_index_mut(index)
+                    .unwrap()
+                    .pos
+                    .position = pos2(new_pos.x, new_pos.y);
 
                 if is_chained {
-                    for other in &mut self.blocks {
+                    for other in self.blocks_mut() {
                         if other.chained && other.id != leader_id {
                             other.pos.position += delta;
                         }
@@ -1231,15 +953,23 @@ impl MaBlocksApp {
             }
         }
 
-        if self.blocks[index].pos.is_dragging && response.drag_stopped() {
-            self.blocks[index].pos.is_dragging = false;
+        let block = self.block_manager.get_by_index(index).unwrap();
+        if block.pos.is_dragging && response.drag_stopped() {
+            let block_id = block.id;
+            let is_group = block.group.is_group;
+            self.block_manager
+                .get_by_index_mut(index)
+                .unwrap()
+                .pos
+                .is_dragging = false;
 
             let mut dropped_into_box = false;
-            if !self.blocks[index].group.is_group {
+            if !is_group {
                 if let Some(m_pos) = input.interact_pos {
                     let world_mouse = (m_pos - canvas_origin) / zoom;
-                    let target_idx =
-                        self.find_group_at_pos(world_mouse.to_pos2(), self.blocks[index].id);
+                    let target_idx = self
+                        .block_manager
+                        .find_group_at_pos(world_mouse.to_pos2(), block_id);
 
                     if let Some(t_idx) = target_idx {
                         self.drop_block_into_box(index, t_idx);
@@ -1253,7 +983,7 @@ impl MaBlocksApp {
                 return (None, true, true);
             }
 
-            dropped_leader_id = Some(self.blocks[index].id);
+            dropped_leader_id = Some(block_id);
         }
 
         (dropped_leader_id, should_reflow, false)
@@ -1290,7 +1020,11 @@ impl MaBlocksApp {
 
         if let Some(path) = dialog.save_file() {
             let session = Session {
-                blocks: self.blocks.iter().map(|b| self.block_to_data(b)).collect(),
+                blocks: self
+                    .blocks()
+                    .iter()
+                    .map(|b| Self::block_to_data(b))
+                    .collect(),
                 remembered_chains: self.serialize_remembered_chains(),
                 last_unboxed_ids: self.last_unboxed_ids.clone(),
                 last_boxed_id: self.last_boxed_id,
@@ -1303,7 +1037,7 @@ impl MaBlocksApp {
         }
     }
 
-    fn block_to_data(&self, b: &ImageBlock) -> BlockData {
+    fn block_to_data(b: &ImageBlock) -> BlockData {
         BlockData {
             id: b.id,
             position: [b.pos.position.x, b.pos.position.y],
@@ -1319,7 +1053,7 @@ impl MaBlocksApp {
                 .group
                 .children
                 .iter()
-                .map(|c| self.block_to_data(c))
+                .map(|c| Self::block_to_data(c))
                 .collect(),
         }
     }
@@ -1333,11 +1067,10 @@ impl MaBlocksApp {
                 .collect();
 
             let texture = ctx.load_texture(
-                format!("group-texture-{}", self.next_block_id),
+                format!("group-texture-{}", self.block_manager.allocate_block_id()),
                 egui::ColorImage::new([1, 1], COLOR_GROUP_PLACEHOLDER),
                 egui::TextureOptions::LINEAR,
             );
-            self.next_block_id += 1;
 
             let representative_texture = children.first().map(|c| c.texture.clone());
 
@@ -1403,7 +1136,8 @@ impl MaBlocksApp {
     }
 
     fn serialize_remembered_chains(&self) -> Vec<Vec<String>> {
-        self.remembered_chains
+        self.block_manager
+            .remembered_chains()
             .iter()
             .map(|chain| chain.iter().map(|id| id.to_string()).collect())
             .collect()
@@ -1422,14 +1156,16 @@ impl MaBlocksApp {
                 if let Ok(session) =
                     serde_json::from_reader::<_, Session>(std::io::BufReader::new(file))
                 {
-                    self.blocks.clear();
+                    self.block_manager.clear();
                     for block_data in session.blocks {
                         if let Some(block) = self.data_to_block(ctx, block_data) {
-                            self.blocks.push(block);
+                            self.block_manager.push(block);
                         }
                     }
-                    self.remembered_chains =
-                        Self::parse_remembered_chains(session.remembered_chains);
+                    self.block_manager
+                        .set_remembered_chains(Self::parse_remembered_chains(
+                            session.remembered_chains,
+                        ));
                     self.last_unboxed_ids = session.last_unboxed_ids;
                     self.last_boxed_id = session.last_boxed_id;
                     self.session_file = Some(path);
@@ -1440,15 +1176,7 @@ impl MaBlocksApp {
     }
 
     fn reset_all_counters(&mut self) {
-        for block in &mut self.blocks {
-            block.reset_counters_recursive();
-        }
-    }
-
-    fn find_group_at_pos(&self, pos: Pos2, exclude_id: Uuid) -> Option<usize> {
-        self.blocks
-            .iter()
-            .position(|b| b.id != exclude_id && b.group.is_group && b.rect().contains(pos))
+        self.block_manager.reset_all_counters();
     }
 }
 
