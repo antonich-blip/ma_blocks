@@ -397,7 +397,19 @@ impl ImageBlock {
             );
 
             if let Some(rep_texture) = &self.group.representative_texture {
-                let tag_size = image_rect.size() * 0.8;
+                let available_size = image_rect.size() * 0.8;
+                let tex_size = rep_texture.size_vec2();
+                let tex_aspect = tex_size.x / tex_size.y;
+                let available_aspect = available_size.x / available_size.y;
+
+                let tag_size = if tex_aspect > available_aspect {
+                    // Texture is wider than available space - fit to width
+                    vec2(available_size.x, available_size.x / tex_aspect)
+                } else {
+                    // Texture is taller than available space - fit to height
+                    vec2(available_size.y * tex_aspect, available_size.y)
+                };
+
                 let tag_rect = Rect::from_center_size(image_rect.center(), tag_size);
                 let mut tag_shape = egui::epaint::RectShape::filled(
                     tag_rect,
