@@ -131,6 +131,75 @@ impl BlockManager {
         self.index_of(id).map(|idx| self.remove(idx))
     }
 
+    /// Removes a block and all its children (for group blocks).
+    /// For non-group blocks, just removes the single block.
+    /// Returns the IDs of all removed blocks.
+    pub fn remove_with_children(&mut self, index: usize) -> Vec<Uuid> {
+        let block = self.blocks.remove(index);
+        let mut removed_ids = vec![block.id];
+
+        // Collect IDs of all children recursively
+        fn collect_child_ids(block: &ImageBlock, ids: &mut Vec<Uuid>) {
+            for child in &block.group.children {
+                ids.push(child.id);
+                collect_child_ids(child, ids);
+            }
+        }
+        collect_child_ids(&block, &mut removed_ids);
+
+        // Clean up animation access order for all removed blocks
+        for id in &removed_ids {
+            self.animation_access_order.retain(|&x| x != *id);
+        }
+
+        removed_ids
+    }
+
+    /// Cascade remove: removes all chained blocks AND their children.
+    /// If the block is not chained, just removes it with its children.
+    /// Returns the IDs of all removed blocks.
+    pub fn remove_cascade(&mut self, index: usize) -> Vec<Uuid> {
+        let block = &self.blocks[index];
+
+        if !block.chained {
+            // Not chained, just remove with children
+            return self.remove_with_children(index);
+        }
+
+        // Collect all chained block indices
+        let mut chained_indices = self.chained_indices();
+        chained_indices.sort_by(|a, b| b.cmp(a)); // Reverse order for safe removal
+
+        let mut all_removed_ids = Vec::new();
+
+        // Remove each chained block with its children
+        for idx in chained_indices {
+            let block = self.blocks.remove(idx);
+            all_removed_ids.push(block.id);
+
+            // Collect child IDs recursively
+            fn collect_child_ids(block: &ImageBlock, ids: &mut Vec<Uuid>) {
+                for child in &block.group.children {
+                    ids.push(child.id);
+                    collect_child_ids(child, ids);
+                }
+            }
+            collect_child_ids(&block, &mut all_removed_ids);
+        }
+
+        // Clean up remembered chains that contain any removed blocks
+        let removed_set: HashSet<Uuid> = all_removed_ids.iter().copied().collect();
+        self.remembered_chains
+            .retain(|chain| chain.is_disjoint(&removed_set));
+
+        // Clean up animation access order
+        for id in &all_removed_ids {
+            self.animation_access_order.retain(|&x| x != *id);
+        }
+
+        all_removed_ids
+    }
+
     /// Clears all blocks.
     pub fn clear(&mut self) {
         self.blocks.clear();

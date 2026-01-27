@@ -62,14 +62,24 @@ The release binary will be located at `target/release/ma_blocks2`.
 | Vertical scroll | Mouse Scroll |
 | Toggle animation | LMB Click on image |
 | Toggle chaining | 'o' button or Ctrl+Click |
+| Toggle file names | Ctrl+N (Cmd+N on macOS) |
 
 ### Toolbar Actions
 
-- **Save Session** - Save current canvas state to JSON
-- **Load Session** - Restore a previous session
+- **Save Session** - Save current canvas state to JSON file
+- **Load Session** - Restore a previous session from JSON file
 - **Add Image** - Bulk load images
 - **Reset Counters** - Reset all block counters to zero
 - **Compact/Unbox** - Pack chained blocks into a Box or unpack
+
+### Automatic Session Persistence
+
+MaBlocks2 automatically remembers your workspace between application restarts:
+
+- **Auto-Save:** Your session is automatically saved every 5 minutes and when closing the application
+- **Auto-Restore:** On startup, your previous session is instantly restored with all block positions, sizes, chains, and UI settings
+- **Skeleton Loading:** Blocks appear immediately as placeholders while images load in the background, allowing you to start working right away
+- **State Preserved:** Zoom level, file name visibility toggle, box groups with their children, and remembered chains are all persisted
 
 ### Wayland Support (Linux)
 The app is configured to support Wayland. If you encounter issues, you can force Wayland or X11 using environment variables:
@@ -86,6 +96,7 @@ WINIT_UNIX_BACKEND=x11 cargo run
 MaBlocks2 is designed to handle a large number of images efficiently:
 
 - **Asynchronous Loading:** Images are decoded in background threads, keeping the UI responsive even when loading many files at once.
+- **Skeleton Loading:** When restoring sessions, blocks appear instantly as placeholders while images load in the background. This includes blocks inside box groups.
 - **On-Demand Animation:** For animated images (GIF, WebP, AVIF), only the first frame is loaded initially. The full animation sequence is loaded only when you enable animation for that block.
 - **Memory Capping:** 
     - **Downsampling:** Large images are automatically downsampled during loading to fit within reasonable dimensions, significantly reducing VRAM and RAM usage.
@@ -121,6 +132,7 @@ MaBlocks2 is designed to handle a large number of images efficiently:
 - Chained blocks move and resize together
 - Uniform height is maintained across chained blocks while preserving aspect ratios
 - **Remembered Chains:** Previously chained groups are remembered - selecting any member auto-selects the entire group (session-persistent)
+- **Cascade Delete:** Shift+click the 'x' button on any chained block to delete all blocks in the chain at once
 
 ### Boxing & Containers
 
@@ -133,7 +145,8 @@ MaBlocks2 is designed to handle a large number of images efficiently:
 
 | Button | Action |
 |--------|--------|
-| 'x' | Delete block |
+| 'x' | Delete block (includes children for Box blocks) |
+| Shift + 'x' | Delete all chained blocks (cascade delete) |
 | 'o' | Toggle chaining |
 | '#' | Increment (LMB) / Decrement (RMB) counter |
 

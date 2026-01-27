@@ -330,6 +330,98 @@ impl ImageBlock {
         }
     }
 
+    /// Recursively populates skeleton blocks matching the given path with loaded image data.
+    /// Returns true if any block was updated, and optionally returns the texture of the first
+    /// updated child (for updating group representative textures).
+    pub fn populate_skeletons_by_path(
+        &mut self,
+        path: &str,
+        frames: &mut Vec<crate::image_loader::AnimationFrame>,
+        has_animation: bool,
+        is_full: bool,
+    ) -> (bool, Option<egui::TextureHandle>) {
+        let mut updated = false;
+        let mut first_texture = None;
+
+        // Check if this block matches
+        if !self.group.is_group && self.path == path {
+            if self.anim.frames.is_empty() {
+                // Skeleton block - populate it
+                self.anim.frames = std::mem::take(frames);
+                self.anim.has_animation = has_animation;
+                self.is_full_sequence = is_full;
+
+                if !self.anim.frames.is_empty() {
+                    self.texture.set(
+                        self.anim.frames[0].image.clone(),
+                        egui::TextureOptions::LINEAR,
+                    );
+                    first_texture = Some(self.texture.clone());
+                }
+                updated = true;
+            } else if is_full && !self.is_full_sequence {
+                // Animation update for existing block
+                self.anim.frames = std::mem::take(frames);
+                self.is_full_sequence = true;
+                self.anim.animation_enabled = true;
+                updated = true;
+            }
+        }
+
+        // Recursively check children if this is a group
+        if self.group.is_group {
+            let mut child_texture_for_representative = None;
+            for child in &mut self.group.children {
+                // Clone frames for each child that needs them (except the last one)
+                let mut child_frames = if !frames.is_empty() {
+                    frames.clone()
+                } else {
+                    Vec::new()
+                };
+                let (child_updated, child_tex) = child.populate_skeletons_by_path(
+                    path,
+                    &mut child_frames,
+                    has_animation,
+                    is_full,
+                );
+                if child_updated {
+                    updated = true;
+                    if child_texture_for_representative.is_none() {
+                        child_texture_for_representative = child_tex;
+                    }
+                }
+            }
+
+            // Update representative texture if first child was updated and we don't have one
+            if self.group.representative_texture.is_none() {
+                if let Some(tex) = child_texture_for_representative {
+                    self.group.representative_texture = Some(tex);
+                }
+            }
+        }
+
+        (updated, first_texture)
+    }
+
+    /// Checks if this block or any of its children need skeleton population for the given path.
+    pub fn needs_skeleton_for_path(&self, path: &str, is_full: bool) -> bool {
+        if !self.group.is_group && self.path == path {
+            if self.anim.frames.is_empty() || (is_full && !self.is_full_sequence) {
+                return true;
+            }
+        }
+
+        if self.group.is_group {
+            for child in &self.group.children {
+                if child.needs_skeleton_for_path(path, is_full) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
     pub fn cmp_layout(&self, other: &Self) -> Ordering {
         match (self.group.is_group, other.group.is_group) {
             (true, false) => Ordering::Less,

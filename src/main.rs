@@ -19,7 +19,7 @@ use egui::{pos2, vec2};
 use paths::AppPaths;
 use serde::{Deserialize, Serialize};
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Duration;
@@ -40,7 +40,7 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(|cc| {
             egui_extras::install_image_loaders(&cc.egui_ctx);
-            Ok(Box::new(MaBlocksApp::new()))
+            Ok(Box::new(MaBlocksApp::new(cc)))
         }),
     )
 }
@@ -55,6 +55,14 @@ struct Session {
     last_unboxed_ids: Vec<Uuid>,
     #[serde(default)]
     last_boxed_id: Option<Uuid>,
+    #[serde(default = "default_zoom")]
+    zoom: f32,
+    #[serde(default)]
+    show_file_names: bool,
+}
+
+fn default_zoom() -> f32 {
+    1.0
 }
 
 /// Serialized form of an ImageBlock for persistence.
@@ -89,6 +97,7 @@ struct InputSnapshot {
     pointer_delta: Vec2,
     zoom_delta: f32,
     ctrl: bool,
+    shift: bool,
 }
 
 impl InputSnapshot {
@@ -104,6 +113,7 @@ impl InputSnapshot {
             pointer_delta: i.pointer.delta(),
             zoom_delta: i.zoom_delta(),
             ctrl: i.modifiers.ctrl,
+            shift: i.modifiers.shift,
         })
     }
 }
@@ -123,6 +133,7 @@ struct MaBlocksApp {
     image_rx: Option<Receiver<image_loader::ImageLoadResponse>>,
     image_tx: Sender<image_loader::ImageLoadResponse>,
     paths: Option<AppPaths>,
+    last_auto_save_time: f64,
 }
 
 impl MaBlocksApp {
@@ -160,7 +171,7 @@ impl MaBlocksApp {
     // ─────────────────────────────────────────────────────────────────────────────
 
     /// Initializes the application state, sets up channels, and discovers project directories.
-    fn new() -> Self {
+    fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let (tx, rx) = channel();
         let paths = AppPaths::from_project_dirs();
         if let Some(ref p) = paths {
@@ -168,7 +179,8 @@ impl MaBlocksApp {
                 log::error!("Failed to create default directories: {err}");
             }
         }
-        Self {
+
+        let mut app = Self {
             block_manager: BlockManager::new(),
             resizing_state: None,
             skip_chain_cancel: false,
@@ -182,7 +194,32 @@ impl MaBlocksApp {
             image_rx: Some(rx),
             image_tx: tx,
             paths,
+            last_auto_save_time: 0.0,
+        };
+
+        if let Some(storage) = cc.storage {
+            if let Some(session) = eframe::get_value::<Session>(storage, eframe::APP_KEY) {
+                app.apply_session_data(&cc.egui_ctx, session);
+            }
         }
+
+        app
+    }
+
+    fn apply_session_data(&mut self, ctx: &egui::Context, session: Session) {
+        self.block_manager.clear();
+        for block_data in session.blocks {
+            if let Some(block) = self.data_to_block_skeleton(ctx, block_data) {
+                self.block_manager.push(block);
+            }
+        }
+        self.block_manager
+            .set_remembered_chains(Self::parse_remembered_chains(session.remembered_chains));
+        self.last_unboxed_ids = session.last_unboxed_ids;
+        self.last_boxed_id = session.last_boxed_id;
+        self.zoom = session.zoom;
+        self.show_file_names = session.show_file_names;
+        self.reorder_and_reflow(None);
     }
 
     /// Opens a file dialog to pick images and triggers background loading for each.
@@ -228,23 +265,31 @@ impl MaBlocksApp {
                 match result {
                     Ok((path, loaded, is_full)) => {
                         let mut loaded = loaded;
-                        let mut update_id = None;
-                        if is_full {
-                            let path_str = path.to_string_lossy().into_owned();
+                        let path_str = path.to_string_lossy().into_owned();
+
+                        // Check if any block (including group children) needs this image
+                        let needs_update = self
+                            .blocks()
+                            .iter()
+                            .any(|b| b.needs_skeleton_for_path(&path_str, is_full));
+
+                        if needs_update {
+                            // Update all matching blocks recursively (including group children)
                             for block in self.blocks_mut() {
-                                if block.path == path_str && !block.is_full_sequence {
-                                    block.anim.frames = std::mem::take(&mut loaded.frames);
-                                    block.is_full_sequence = true;
-                                    block.anim.animation_enabled = true;
-                                    update_id = Some(block.id);
-                                    break;
+                                let (updated, _) = block.populate_skeletons_by_path(
+                                    &path_str,
+                                    &mut loaded.frames,
+                                    loaded.has_animation,
+                                    is_full,
+                                );
+                                if updated && is_full {
+                                    // Note: We can't call mark_animation_used here for children
+                                    // as they're not in the main block list. This is acceptable
+                                    // since group children don't play animations independently.
                                 }
                             }
-                        }
-
-                        if let Some(id) = update_id {
-                            self.block_manager.mark_animation_used(id);
                         } else {
+                            // New block being added (not a skeleton restore)
                             match self.insert_loaded_image(ctx, path, loaded, is_full) {
                                 Ok(id) => added_ids.push(id),
                                 Err(err) => log::error!("{err}"),
@@ -272,6 +317,82 @@ impl MaBlocksApp {
                 self.reorder_and_reflow(None);
             }
             self.image_rx = Some(rx);
+        }
+    }
+
+    fn data_to_block_skeleton(
+        &mut self,
+        ctx: &egui::Context,
+        data: BlockData,
+    ) -> Option<ImageBlock> {
+        if data.is_group {
+            let children: Vec<ImageBlock> = data
+                .children
+                .into_iter()
+                .filter_map(|c| self.data_to_block_skeleton(ctx, c))
+                .collect();
+
+            let texture = ctx.load_texture(
+                format!("group-texture-{}", self.block_manager.allocate_block_id()),
+                egui::ColorImage::new([1, 1], COLOR_GROUP_PLACEHOLDER),
+                egui::TextureOptions::LINEAR,
+            );
+
+            let representative_texture = children.first().map(|c| c.texture.clone());
+
+            let mut group =
+                ImageBlock::new_group(data.group_name, children, texture, representative_texture);
+            group.id = data.id;
+            group.color = Color32::from_rgba_unmultiplied(
+                data.color[0],
+                data.color[1],
+                data.color[2],
+                data.color[3],
+            );
+            group.pos.position = pos2(data.position[0], data.position[1]);
+            group.set_preferred_size(vec2(data.size[0], data.size[1]));
+            group.chained = data.chained;
+            Some(group)
+        } else {
+            if data.path.is_empty() {
+                return None;
+            }
+
+            // Create a skeleton block with a neutral placeholder
+            let texture = ctx.load_texture(
+                format!("skeleton-texture-{}", data.id),
+                egui::ColorImage::new([1, 1], Color32::from_gray(40)),
+                egui::TextureOptions::LINEAR,
+            );
+
+            let mut block = ImageBlock::new(
+                data.path.clone(),
+                texture,
+                Vec::new(),
+                vec2(data.size[0], data.size[1]),
+                false, // Will be updated when image loads
+                false,
+            );
+            block.id = data.id;
+            block.color = Color32::from_rgba_unmultiplied(
+                data.color[0],
+                data.color[1],
+                data.color[2],
+                data.color[3],
+            );
+            block.pos.position = pos2(data.position[0], data.position[1]);
+            block.set_preferred_size(vec2(data.size[0], data.size[1]));
+            block.chained = data.chained;
+            block.counter = data.counter;
+            // Note: we don't restore animation_enabled here - it will be set to false
+            // and the user will need to click to load the full animation sequence on demand
+
+            // Always load first frame only on session restore
+            // Full sequence will be loaded on-demand when user clicks
+            let path_buf = PathBuf::from(&data.path);
+            self.trigger_image_load(path_buf, true);
+
+            Some(block)
         }
     }
 
@@ -484,6 +605,15 @@ impl MaBlocksApp {
 
 impl eframe::App for MaBlocksApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let current_time = ctx.input(|i| i.time);
+        if current_time - self.last_auto_save_time > 300.0 {
+            if let Some(storage) = _frame.storage_mut() {
+                self.save(storage);
+                self.last_auto_save_time = current_time;
+                log::info!("Auto-saved session");
+            }
+        }
+
         self.poll_image_rx(ctx);
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::N)) {
             self.show_file_names = !self.show_file_names;
@@ -502,6 +632,22 @@ impl eframe::App for MaBlocksApp {
         } else if should_reflow {
             self.reflow_blocks();
         }
+    }
+
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        let session = Session {
+            blocks: self
+                .blocks()
+                .iter()
+                .map(|b| Self::block_to_data(b))
+                .collect(),
+            remembered_chains: self.serialize_remembered_chains(),
+            last_unboxed_ids: self.last_unboxed_ids.clone(),
+            last_boxed_id: self.last_boxed_id,
+            zoom: self.zoom,
+            show_file_names: self.show_file_names,
+        };
+        eframe::set_value(storage, eframe::APP_KEY, &session);
     }
 }
 
@@ -622,13 +768,19 @@ impl MaBlocksApp {
                             || hover_state.chain_hovered
                             || hover_state.counter_hovered;
 
-                        let mut remove = false;
+                        let mut remove_single = false;
+                        let mut remove_cascade = false;
                         if input.primary_clicked && hover_state.close_hovered {
-                            remove = true;
+                            if input.shift {
+                                remove_cascade = true;
+                            } else {
+                                remove_single = true;
+                            }
                             self.skip_chain_cancel = true;
                         }
 
-                        if !remove
+                        if !remove_single
+                            && !remove_cascade
                             && self.handle_block_interaction(
                                 index,
                                 &input,
@@ -644,7 +796,7 @@ impl MaBlocksApp {
                         let response =
                             canvas_ui.interact(block_rect, block_id, Sense::click_and_drag());
 
-                        if !remove {
+                        if !remove_single && !remove_cascade {
                             let (d_id, s_reflow, removed) = self.process_block_drag(
                                 index,
                                 &response,
@@ -692,7 +844,8 @@ impl MaBlocksApp {
                             dragging_blocks_to_render.push((id, block_rect, config));
                         }
 
-                        if !remove
+                        if !remove_single
+                            && !remove_cascade
                             && input.primary_clicked
                             && response.clicked()
                             && !any_button_hovered
@@ -700,8 +853,11 @@ impl MaBlocksApp {
                             self.handle_block_click(index, input.ctrl);
                         }
 
-                        if remove {
-                            self.block_manager.remove(index);
+                        if remove_cascade {
+                            self.block_manager.remove_cascade(index);
+                            should_reflow = true;
+                        } else if remove_single {
+                            self.block_manager.remove_with_children(index);
                             should_reflow = true;
                         }
                     }
@@ -1028,6 +1184,8 @@ impl MaBlocksApp {
                 remembered_chains: self.serialize_remembered_chains(),
                 last_unboxed_ids: self.last_unboxed_ids.clone(),
                 last_boxed_id: self.last_boxed_id,
+                zoom: self.zoom,
+                show_file_names: self.show_file_names,
             };
 
             if let Ok(file) = std::fs::File::create(&path) {
@@ -1055,70 +1213,6 @@ impl MaBlocksApp {
                 .iter()
                 .map(|c| Self::block_to_data(c))
                 .collect(),
-        }
-    }
-
-    fn data_to_block(&mut self, ctx: &egui::Context, data: BlockData) -> Option<ImageBlock> {
-        if data.is_group {
-            let children: Vec<ImageBlock> = data
-                .children
-                .into_iter()
-                .filter_map(|c| self.data_to_block(ctx, c))
-                .collect();
-
-            let texture = ctx.load_texture(
-                format!("group-texture-{}", self.block_manager.allocate_block_id()),
-                egui::ColorImage::new([1, 1], COLOR_GROUP_PLACEHOLDER),
-                egui::TextureOptions::LINEAR,
-            );
-
-            let representative_texture = children.first().map(|c| c.texture.clone());
-
-            let mut group =
-                ImageBlock::new_group(data.group_name, children, texture, representative_texture);
-            group.id = data.id;
-            group.color = Color32::from_rgba_unmultiplied(
-                data.color[0],
-                data.color[1],
-                data.color[2],
-                data.color[3],
-            );
-            group.pos.position = pos2(data.position[0], data.position[1]);
-            group.set_preferred_size(vec2(data.size[0], data.size[1]));
-            group.chained = data.chained;
-            Some(group)
-        } else {
-            if data.path.is_empty() {
-                return None;
-            }
-            if let Ok(path_buf) = Path::new(&data.path).canonicalize() {
-                if let Ok(loaded) = image_loader::load_image_frames_scaled(
-                    &path_buf,
-                    Some(MAX_BLOCK_DIMENSION as u32),
-                    true,
-                ) {
-                    if let Ok(mut block) =
-                        self.create_block_from_loaded(ctx, path_buf, loaded, false)
-                    {
-                        block.id = data.id;
-                        block.color = Color32::from_rgba_unmultiplied(
-                            data.color[0],
-                            data.color[1],
-                            data.color[2],
-                            data.color[3],
-                        );
-                        block.pos.position = pos2(data.position[0], data.position[1]);
-                        block.set_preferred_size(vec2(data.size[0], data.size[1]));
-                        block.chained = data.chained;
-                        block.counter = data.counter;
-                        if data.animation_enabled && block.anim.frames.len() > 1 {
-                            block.anim.animation_enabled = true;
-                        }
-                        return Some(block);
-                    }
-                }
-            }
-            None
         }
     }
 
@@ -1156,20 +1250,8 @@ impl MaBlocksApp {
                 if let Ok(session) =
                     serde_json::from_reader::<_, Session>(std::io::BufReader::new(file))
                 {
-                    self.block_manager.clear();
-                    for block_data in session.blocks {
-                        if let Some(block) = self.data_to_block(ctx, block_data) {
-                            self.block_manager.push(block);
-                        }
-                    }
-                    self.block_manager
-                        .set_remembered_chains(Self::parse_remembered_chains(
-                            session.remembered_chains,
-                        ));
-                    self.last_unboxed_ids = session.last_unboxed_ids;
-                    self.last_boxed_id = session.last_boxed_id;
+                    self.apply_session_data(ctx, session);
                     self.session_file = Some(path);
-                    self.reorder_and_reflow(None);
                 }
             }
         }
