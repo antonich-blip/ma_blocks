@@ -1,11 +1,12 @@
 # MaBlocks2
 
-A whiteboard-style desktop application for organizing and managing images on an infinite canvas. Built with Rust using the `eframe`/`egui` framework.
+A whiteboard-style desktop application for organizing and managing images on an infinite canvas. 
+Built with Rust using the `eframe`/`egui` framework.
 
 **Key Features:**
 - Drag-and-drop image organization with automatic row-based layout
 - Support for PNG, JPG, GIF, WebP, and AVIF (including animations)
-- Block chaining for grouping related images
+- Blocks chaining for grouping/manipulating related images (group resize, move, remove from canvas, add to box)
 - Box containers for organizing groups
 - Session save/load for persistent workspaces
 - Efficient memory management with async loading and LRU caching
