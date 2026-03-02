@@ -236,6 +236,10 @@ mod avif_support {
 
         let mut frames = Vec::new();
         let mut frame_index: u32 = 0;
+        // Reuse a single RGB buffer across all frames to avoid repeated malloc/free
+        // syscalls. For animations (the common case), all frames share the same
+        // dimensions so the buffer is allocated once and reused for every frame.
+        let mut rgb = RgbImageGuard::new();
 
         let limit = if first_frame_only {
             1
@@ -261,8 +265,7 @@ mod avif_support {
                     continue;
                 }
 
-                let mut rgb = RgbImageGuard::new();
-                rgb.allocate(image);
+                rgb.ensure_allocated(image);
                 rgb.convert_from_yuv(image);
                 let pixels = rgb.extract_pixels();
 
@@ -289,11 +292,12 @@ mod avif_support {
                     }
                 };
 
-                frames.push(AvifFrame {
-                    pixels,
-                    width,
-                    height,
-                    duration: duration_secs,
+                // Build AnimationFrame directly — no intermediate struct needed.
+                let size = [width as usize, height as usize];
+                let color_image = ColorImage::from_rgba_unmultiplied(size, &pixels);
+                frames.push(AnimationFrame {
+                    image: color_image,
+                    duration: sanitize_duration(Duration::from_secs_f64(duration_secs.max(0.0))),
                 });
 
                 frame_index += 1;
@@ -308,26 +312,7 @@ mod avif_support {
             return Err("AVIF decode produced no frames".to_string());
         }
 
-        let converted = frames
-            .into_iter()
-            .map(|frame| {
-                let size = [frame.width as usize, frame.height as usize];
-                let image = ColorImage::from_rgba_unmultiplied(size, &frame.pixels);
-                AnimationFrame {
-                    image,
-                    duration: sanitize_duration(Duration::from_secs_f64(frame.duration.max(0.0))),
-                }
-            })
-            .collect();
-
-        Ok(LoadedImage::from_frames(converted, image_count > 1))
-    }
-
-    struct AvifFrame {
-        pixels: Vec<u8>,
-        width: u32,
-        height: u32,
-        duration: f64,
+        Ok(LoadedImage::from_frames(frames, image_count > 1))
     }
 
     struct DecoderGuard {
@@ -387,6 +372,29 @@ mod avif_support {
             }
         }
 
+        /// Reuses the existing pixel buffer if the frame dimensions haven't changed,
+        /// otherwise frees and reallocates. Avoids repeated malloc/free syscalls
+        /// for animations where all frames share the same resolution (the common case).
+        fn ensure_allocated(&mut self, image: *const libavif_sys::avifImage) {
+            // SAFETY: image is a valid pointer from the decoder.
+            let (new_w, new_h) = unsafe { ((*image).width, (*image).height) };
+
+            if self.allocated && self.rgb.width == new_w && self.rgb.height == new_h {
+                // Buffer already the correct size — skip reallocation.
+                return;
+            }
+
+            // Dimensions changed or first frame — (re)allocate.
+            if self.allocated {
+                // SAFETY: self.rgb.pixels was allocated by avifRGBImageAllocatePixels.
+                unsafe {
+                    libavif_sys::avifRGBImageFreePixels(&mut self.rgb);
+                }
+                self.allocated = false;
+            }
+            self.allocate(image);
+        }
+
         fn convert_from_yuv(&mut self, image: *const libavif_sys::avifImage) {
             // SAFETY: image is a valid pointer from the decoder, and self.rgb has had pixels allocated.
             unsafe {
@@ -399,18 +407,31 @@ mod avif_support {
             let height = self.rgb.height;
             let row_bytes = self.rgb.rowBytes;
 
-            let mut packed_pixels = Vec::with_capacity((width * height * 4) as usize);
-            // SAFETY: self.rgb.pixels was allocated by avifRGBImageAllocatePixels and row_bytes * height is the correct size.
+            // Defensive: handle invalid dimensions
+            if width == 0 || height == 0 {
+                return Vec::new();
+            }
+
+            // SAFETY: self.rgb.pixels was allocated by avifRGBImageAllocatePixels.
             unsafe {
-                let pixel_slice =
-                    std::slice::from_raw_parts(self.rgb.pixels, (row_bytes * height) as usize);
-                for y in 0..height {
-                    let src_offset = (y * row_bytes) as usize;
-                    let src_row = &pixel_slice[src_offset..src_offset + (width * 4) as usize];
-                    packed_pixels.extend_from_slice(src_row);
+                // Fast path: data is already contiguous (no row padding)
+                // This is true for most AVIF images
+                if row_bytes == width * 4 {
+                    let total_pixels = (width * height * 4) as usize;
+                    std::slice::from_raw_parts(self.rgb.pixels, total_pixels).to_vec()
+                } else {
+                    // Slow path: copy row by row, handling potential row padding
+                    let mut packed_pixels = Vec::with_capacity((width * height * 4) as usize);
+                    let pixel_slice =
+                        std::slice::from_raw_parts(self.rgb.pixels, (row_bytes * height) as usize);
+                    for y in 0..height {
+                        let src_offset = (y * row_bytes) as usize;
+                        let src_row = &pixel_slice[src_offset..src_offset + (width * 4) as usize];
+                        packed_pixels.extend_from_slice(src_row);
+                    }
+                    packed_pixels
                 }
             }
-            packed_pixels
         }
     }
 
