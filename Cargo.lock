@@ -2403,6 +2403,7 @@ dependencies = [
  "serde",
  "serde_json",
  "uuid",
+ "yuv",
 ]
 
 [[package]]
@@ -5435,6 +5436,15 @@ dependencies = [
  "quote",
  "syn 2.0.117",
  "synstructure",
+]
+
+[[package]]
+name = "yuv"
+version = "0.8.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59a0036e8395a36727d814d90c490872c580e29d69edccf6f00d956d9bca985c"
+dependencies = [
+ "num-traits",
 ]
 
 [[package]]

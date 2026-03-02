@@ -251,10 +251,8 @@ mod avif_support {
 
         let mut frames = Vec::new();
         let mut frame_index: u32 = 0;
-        // Reuse a single RGB buffer across all frames to avoid repeated malloc/free
-        // syscalls. For animations (the common case), all frames share the same
-        // dimensions so the buffer is allocated once and reused for every frame.
-        let mut rgb = RgbImageGuard::new();
+        // Fallback RGB buffer kept for formats the SIMD path doesn't support.
+        let mut rgb_fallback = RgbImageGuard::new();
 
         let limit = if first_frame_only {
             1
@@ -280,9 +278,16 @@ mod avif_support {
                     continue;
                 }
 
-                rgb.ensure_allocated(image);
-                rgb.convert_from_yuv(image);
-                let pixels = rgb.extract_pixels();
+                // Try SIMD-accelerated YUV→RGBA first, fall back to libavif's
+                // (non-libyuv) C implementation for unsupported formats.
+                let pixels = match convert_yuv_to_rgba_simd(image) {
+                    Ok(rgba) => rgba,
+                    Err(_) => {
+                        rgb_fallback.ensure_allocated(image);
+                        rgb_fallback.convert_from_yuv(image);
+                        rgb_fallback.extract_pixels()
+                    }
+                };
 
                 // SAFETY: decoder.decoder is valid, and frame_index is within bounds (0..image_count).
                 // timing is zero-initialized and passed as a mutable reference.
@@ -328,6 +333,286 @@ mod avif_support {
         }
 
         Ok(LoadedImage::from_frames(frames, image_count > 1))
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // SIMD YUV→RGBA conversion via the `yuv` crate
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// Maps a libavif `avifRange` constant to a `yuv` crate `YuvRange`.
+    fn map_range(range: libavif_sys::avifRange) -> yuv::YuvRange {
+        if range == libavif_sys::AVIF_RANGE_FULL {
+            yuv::YuvRange::Full
+        } else {
+            yuv::YuvRange::Limited
+        }
+    }
+
+    /// Maps a libavif `avifMatrixCoefficients` constant to a `yuv` crate `YuvStandardMatrix`.
+    /// Returns `None` for Identity (0) and YCgCo (8) which need special dispatch,
+    /// and for truly unsupported matrices.
+    fn map_matrix(mc: u16) -> Option<yuv::YuvStandardMatrix> {
+        // Constants from libavif-sys 0.13:
+        // 0 = Identity, 1 = BT709, 2 = Unspecified, 4 = FCC, 5 = BT470BG,
+        // 6 = BT601, 7 = SMPTE240, 8 = YCgCo, 9 = BT2020_NCL
+        match mc as u32 {
+            1 => Some(yuv::YuvStandardMatrix::Bt709),
+            // Unspecified: default to BT.601 (common practice, matches most encoders)
+            2 => Some(yuv::YuvStandardMatrix::Bt601),
+            4 => Some(yuv::YuvStandardMatrix::Fcc),
+            5 => Some(yuv::YuvStandardMatrix::Bt470_6),
+            6 => Some(yuv::YuvStandardMatrix::Bt601),
+            7 => Some(yuv::YuvStandardMatrix::Smpte240),
+            9 | 10 => Some(yuv::YuvStandardMatrix::Bt2020),
+            // Identity (0) and YCgCo (8) handled separately by caller.
+            // Other values (11-14) are unsupported → fallback.
+            _ => None,
+        }
+    }
+
+    /// Reads a YUV plane from an `avifImage` as a `&[u8]` slice.
+    /// `plane_idx`: 0=Y, 1=U, 2=V.
+    ///
+    /// # Safety
+    /// `image` must be a valid, non-null pointer to a decoded `avifImage`.
+    unsafe fn yuv_plane_slice(
+        image: *const libavif_sys::avifImage,
+        plane_idx: usize,
+        row_count: u32,
+    ) -> &'static [u8] {
+        let ptr = (*image).yuvPlanes[plane_idx];
+        let row_bytes = (*image).yuvRowBytes[plane_idx];
+        if ptr.is_null() || row_bytes == 0 || row_count == 0 {
+            &[]
+        } else {
+            std::slice::from_raw_parts(ptr, (row_bytes * row_count) as usize)
+        }
+    }
+
+    /// Attempts SIMD-accelerated YUV→RGBA conversion for 8-bit images.
+    /// Returns `Err(())` for unsupported formats (caller should use the fallback).
+    ///
+    /// # Safety
+    /// `image` must be a valid, non-null pointer to a decoded `avifImage`
+    /// whose YUV planes are populated (i.e. after `avifDecoderNextImage`).
+    fn convert_yuv_to_rgba_simd(image: *const libavif_sys::avifImage) -> Result<Vec<u8>, ()> {
+        // SAFETY: caller guarantees image is valid and non-null.
+        let (width, height, depth, fmt, range, mc) = unsafe {
+            (
+                (*image).width,
+                (*image).height,
+                (*image).depth,
+                (*image).yuvFormat,
+                (*image).yuvRange,
+                (*image).matrixCoefficients,
+            )
+        };
+
+        // Only handle 8-bit for now; 10/12-bit is rare in practice and the
+        // fallback handles it correctly (though slower).
+        if depth != 8 {
+            return Err(());
+        }
+
+        let yuv_range = map_range(range);
+        let rgba_stride = width * 4;
+        let mut rgba = vec![0u8; (width * height * 4) as usize];
+
+        // Identity matrix (GBR) — special dispatch, no matrix parameter.
+        if mc as u32 == 0 {
+            convert_identity(image, width, height, fmt, yuv_range, &mut rgba, rgba_stride)?;
+            apply_alpha(image, &mut rgba, width, height);
+            return Ok(rgba);
+        }
+
+        // YCgCo matrix — special dispatch, no matrix parameter.
+        if mc as u32 == 8 {
+            convert_ycgco(image, width, height, fmt, yuv_range, &mut rgba, rgba_stride)?;
+            apply_alpha(image, &mut rgba, width, height);
+            return Ok(rgba);
+        }
+
+        // Standard YCbCr matrices.
+        let matrix = map_matrix(mc).ok_or(())?;
+
+        // SAFETY: image planes are valid after avifDecoderNextImage.
+        unsafe {
+            match fmt {
+                libavif_sys::AVIF_PIXEL_FORMAT_YUV420 => {
+                    let chroma_h = (height + 1) / 2;
+                    let planar = yuv::YuvPlanarImage {
+                        y_plane: yuv_plane_slice(image, 0, height),
+                        y_stride: (*image).yuvRowBytes[0],
+                        u_plane: yuv_plane_slice(image, 1, chroma_h),
+                        u_stride: (*image).yuvRowBytes[1],
+                        v_plane: yuv_plane_slice(image, 2, chroma_h),
+                        v_stride: (*image).yuvRowBytes[2],
+                        width,
+                        height,
+                    };
+                    yuv::yuv420_to_rgba(&planar, &mut rgba, rgba_stride, yuv_range, matrix)
+                        .map_err(|_| ())?;
+                }
+                libavif_sys::AVIF_PIXEL_FORMAT_YUV422 => {
+                    let planar = yuv::YuvPlanarImage {
+                        y_plane: yuv_plane_slice(image, 0, height),
+                        y_stride: (*image).yuvRowBytes[0],
+                        u_plane: yuv_plane_slice(image, 1, height),
+                        u_stride: (*image).yuvRowBytes[1],
+                        v_plane: yuv_plane_slice(image, 2, height),
+                        v_stride: (*image).yuvRowBytes[2],
+                        width,
+                        height,
+                    };
+                    yuv::yuv422_to_rgba(&planar, &mut rgba, rgba_stride, yuv_range, matrix)
+                        .map_err(|_| ())?;
+                }
+                libavif_sys::AVIF_PIXEL_FORMAT_YUV444 => {
+                    let planar = yuv::YuvPlanarImage {
+                        y_plane: yuv_plane_slice(image, 0, height),
+                        y_stride: (*image).yuvRowBytes[0],
+                        u_plane: yuv_plane_slice(image, 1, height),
+                        u_stride: (*image).yuvRowBytes[1],
+                        v_plane: yuv_plane_slice(image, 2, height),
+                        v_stride: (*image).yuvRowBytes[2],
+                        width,
+                        height,
+                    };
+                    yuv::yuv444_to_rgba(&planar, &mut rgba, rgba_stride, yuv_range, matrix)
+                        .map_err(|_| ())?;
+                }
+                libavif_sys::AVIF_PIXEL_FORMAT_YUV400 => {
+                    let gray = yuv::YuvGrayImage {
+                        y_plane: yuv_plane_slice(image, 0, height),
+                        y_stride: (*image).yuvRowBytes[0],
+                        width,
+                        height,
+                    };
+                    yuv::yuv400_to_rgba(&gray, &mut rgba, rgba_stride, yuv_range, matrix)
+                        .map_err(|_| ())?;
+                }
+                _ => return Err(()),
+            }
+        }
+
+        // Apply alpha plane if present.
+        apply_alpha(image, &mut rgba, width, height);
+
+        Ok(rgba)
+    }
+
+    /// Handles Identity matrix (matrixCoefficients=0, aka GBR) conversion.
+    fn convert_identity(
+        image: *const libavif_sys::avifImage,
+        width: u32,
+        height: u32,
+        fmt: libavif_sys::avifPixelFormat,
+        range: yuv::YuvRange,
+        rgba: &mut [u8],
+        rgba_stride: u32,
+    ) -> Result<(), ()> {
+        // Identity/GBR only makes sense with 4:4:4.
+        if fmt != libavif_sys::AVIF_PIXEL_FORMAT_YUV444 {
+            return Err(());
+        }
+        unsafe {
+            let planar = yuv::YuvPlanarImage {
+                y_plane: yuv_plane_slice(image, 0, height),
+                y_stride: (*image).yuvRowBytes[0],
+                u_plane: yuv_plane_slice(image, 1, height),
+                u_stride: (*image).yuvRowBytes[1],
+                v_plane: yuv_plane_slice(image, 2, height),
+                v_stride: (*image).yuvRowBytes[2],
+                width,
+                height,
+            };
+            yuv::gbr_to_rgba(&planar, rgba, rgba_stride, range).map_err(|_| ())?;
+        }
+        Ok(())
+    }
+
+    /// Handles YCgCo matrix (matrixCoefficients=8) conversion.
+    fn convert_ycgco(
+        image: *const libavif_sys::avifImage,
+        width: u32,
+        height: u32,
+        fmt: libavif_sys::avifPixelFormat,
+        range: yuv::YuvRange,
+        rgba: &mut [u8],
+        rgba_stride: u32,
+    ) -> Result<(), ()> {
+        unsafe {
+            match fmt {
+                libavif_sys::AVIF_PIXEL_FORMAT_YUV420 => {
+                    let chroma_h = (height + 1) / 2;
+                    let planar = yuv::YuvPlanarImage {
+                        y_plane: yuv_plane_slice(image, 0, height),
+                        y_stride: (*image).yuvRowBytes[0],
+                        u_plane: yuv_plane_slice(image, 1, chroma_h),
+                        u_stride: (*image).yuvRowBytes[1],
+                        v_plane: yuv_plane_slice(image, 2, chroma_h),
+                        v_stride: (*image).yuvRowBytes[2],
+                        width,
+                        height,
+                    };
+                    yuv::ycgco420_to_rgba(&planar, rgba, rgba_stride, range).map_err(|_| ())?;
+                }
+                libavif_sys::AVIF_PIXEL_FORMAT_YUV422 => {
+                    let planar = yuv::YuvPlanarImage {
+                        y_plane: yuv_plane_slice(image, 0, height),
+                        y_stride: (*image).yuvRowBytes[0],
+                        u_plane: yuv_plane_slice(image, 1, height),
+                        u_stride: (*image).yuvRowBytes[1],
+                        v_plane: yuv_plane_slice(image, 2, height),
+                        v_stride: (*image).yuvRowBytes[2],
+                        width,
+                        height,
+                    };
+                    yuv::ycgco422_to_rgba(&planar, rgba, rgba_stride, range).map_err(|_| ())?;
+                }
+                libavif_sys::AVIF_PIXEL_FORMAT_YUV444 => {
+                    let planar = yuv::YuvPlanarImage {
+                        y_plane: yuv_plane_slice(image, 0, height),
+                        y_stride: (*image).yuvRowBytes[0],
+                        u_plane: yuv_plane_slice(image, 1, height),
+                        u_stride: (*image).yuvRowBytes[1],
+                        v_plane: yuv_plane_slice(image, 2, height),
+                        v_stride: (*image).yuvRowBytes[2],
+                        width,
+                        height,
+                    };
+                    yuv::ycgco444_to_rgba(&planar, rgba, rgba_stride, range).map_err(|_| ())?;
+                }
+                _ => return Err(()),
+            }
+        }
+        Ok(())
+    }
+
+    /// Composites the alpha plane from an `avifImage` onto an RGBA buffer.
+    /// If no alpha plane is present, sets all alpha bytes to 255 (fully opaque).
+    fn apply_alpha(image: *const libavif_sys::avifImage, rgba: &mut [u8], width: u32, height: u32) {
+        // SAFETY: image is a valid pointer from the decoder.
+        let (alpha_ptr, alpha_row_bytes) = unsafe { ((*image).alphaPlane, (*image).alphaRowBytes) };
+
+        if alpha_ptr.is_null() || alpha_row_bytes == 0 {
+            // No alpha plane — set all alpha bytes to 255 (opaque).
+            for pixel in rgba.chunks_exact_mut(4) {
+                pixel[3] = 255;
+            }
+        } else {
+            // SAFETY: alpha_ptr is non-null and points to decoder-owned data.
+            let alpha_slice = unsafe {
+                std::slice::from_raw_parts(alpha_ptr, (alpha_row_bytes * height) as usize)
+            };
+            for y in 0..height as usize {
+                let alpha_row_start = y * alpha_row_bytes as usize;
+                let rgba_row_start = y * (width as usize * 4);
+                for x in 0..width as usize {
+                    rgba[rgba_row_start + x * 4 + 3] = alpha_slice[alpha_row_start + x];
+                }
+            }
+        }
     }
 
     struct DecoderGuard {
