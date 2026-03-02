@@ -4,7 +4,7 @@ debug/
 *.pdb
 
 # Cargo
-Cargo.lock
+# Cargo.lock - kept for reproducible Nix builds
 **/*.rs.bk
 
 # Test files
@@ -47,6 +47,10 @@ ehthumbs.db
 # Logs
 *.log
 
+# Nix
+result
+result-*
+.direnv/
 
 # Added by cargo
 #

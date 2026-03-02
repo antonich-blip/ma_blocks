@@ -48,6 +48,19 @@ cargo build --release
 ```
 The release binary will be located at `target/release/ma_blocks2`.
 
+
+## Nix_Os: personal use case
+
+```sh
+Verify it works:
+which ma_blocks2          # Should show ~/.nix-profile/bin/ma_blocks2
+ma_blocks2 --help         # Or just run it
+To update after rebuilding:
+cd /home/nixos/projects/ma_blocks && nix build .#default
+nix profile upgrade ma_blocks2   # Or: nix profile add .#default --overwrite
+
+```
+
 ---
 
 ## Usage
