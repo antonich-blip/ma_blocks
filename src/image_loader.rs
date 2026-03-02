@@ -72,22 +72,18 @@ pub fn load_image_frames_scaled(
     }?;
 
     if let Some(max_dim) = max_dimension {
-        for frame in &mut loaded.frames {
+        // Check if any frame needs downsampling before paying rayon dispatch cost.
+        let needs_downsampling = loaded.frames.iter().any(|frame| {
             let [w, h] = frame.image.size;
-            if w > max_dim as usize || h > max_dim as usize {
-                let scale = (max_dim as f32) / (w.max(h) as f32);
-                let new_w = (w as f32 * scale) as u32;
-                let new_h = (h as f32 * scale) as u32;
+            w > max_dim as usize || h > max_dim as usize
+        });
 
-                let rgba = frame.image.as_raw().to_vec();
-                if let Some(img) =
-                    image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(w as u32, h as u32, rgba)
-                {
-                    let dynamic = DynamicImage::ImageRgba8(img);
-                    let resized = dynamic.thumbnail(new_w, new_h);
-                    frame.image = color_image_from_dynamic(resized);
-                }
-            }
+        if needs_downsampling {
+            use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
+
+            loaded.frames.par_iter_mut().for_each(|frame| {
+                downsample_frame(frame, max_dim);
+            });
         }
     }
 
@@ -179,6 +175,25 @@ fn color_image_from_dynamic(image: DynamicImage) -> egui::ColorImage {
     let rgba = image.to_rgba8();
     let size = [rgba.width() as usize, rgba.height() as usize];
     egui::ColorImage::from_rgba_unmultiplied(size, &rgba.into_raw())
+}
+
+/// Downsamples a single frame if it exceeds the given maximum dimension.
+fn downsample_frame(frame: &mut AnimationFrame, max_dim: u32) {
+    let [w, h] = frame.image.size;
+    if w > max_dim as usize || h > max_dim as usize {
+        let scale = (max_dim as f32) / (w.max(h) as f32);
+        let new_w = (w as f32 * scale) as u32;
+        let new_h = (h as f32 * scale) as u32;
+
+        let rgba = frame.image.as_raw().to_vec();
+        if let Some(img) =
+            image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(w as u32, h as u32, rgba)
+        {
+            let dynamic = DynamicImage::ImageRgba8(img);
+            let resized = dynamic.thumbnail(new_w, new_h);
+            frame.image = color_image_from_dynamic(resized);
+        }
+    }
 }
 
 /// Calculates a Duration from an image delay, with a minimum value of 1ms.

@@ -2398,6 +2398,7 @@ dependencies = [
  "image",
  "libavif-sys",
  "log",
+ "rayon",
  "rfd",
  "serde",
  "serde_json",
