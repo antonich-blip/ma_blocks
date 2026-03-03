@@ -76,7 +76,7 @@ nix profile upgrade ma_blocks2   # Or: nix profile add .#default --overwrite
 | Vertical scroll | Mouse Scroll |
 | Toggle animation | LMB Click on image |
 | Toggle chaining | 'o' button or Ctrl+Click |
-| Toggle file names | Ctrl+N (Cmd+N on macOS) |
+| Toggle file names | Ctrl+N (Cmd+N on macOS) - displays filename and size at bottom of block |
 
 ### Toolbar Actions
 

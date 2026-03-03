@@ -130,6 +130,7 @@ pub struct ImageBlock {
     pub chained: bool,
     pub counter: i32,
     pub is_full_sequence: bool,
+    pub file_size: u64,
 }
 
 /// Contextual configuration passed during the rendering phase of a block.
@@ -189,6 +190,7 @@ impl ImageBlock {
             chained: false,
             counter: 0,
             is_full_sequence,
+            file_size: 0,
         }
     }
 
@@ -231,6 +233,7 @@ impl ImageBlock {
             chained: false,
             counter: 0,
             is_full_sequence: true,
+            file_size: 0,
         }
     }
 
@@ -610,26 +613,30 @@ impl ImageBlock {
         }
 
         if config.show_file_names {
-            let name = if self.group.is_group {
-                &self.group.group_name
+            let label_text = if self.group.is_group {
+                self.group.group_name.clone()
             } else {
-                Path::new(&self.path)
+                let name = Path::new(&self.path)
                     .file_name()
                     .and_then(|n| n.to_str())
-                    .unwrap_or("unnamed")
+                    .unwrap_or("unnamed");
+                let size_mb = self.file_size as f64 / 1_048_576.0;
+                format!("{}  {:.2} MB", name, size_mb)
             };
 
             let font_id = FontId::proportional(LABEL_FONT_SIZE * config.zoom);
             let galley = ui
                 .painter()
-                .layout_no_wrap(name.to_string(), font_id, Color32::WHITE);
+                .layout_no_wrap(label_text, font_id, Color32::WHITE);
 
-            let text_pos = image_rect.left_top()
-                + vec2(LABEL_PADDING * config.zoom, LABEL_PADDING * config.zoom);
+            let padding = LABEL_PADDING * config.zoom;
+            let expansion = LABEL_BG_EXPANSION * config.zoom;
+            let text_pos =
+                image_rect.left_bottom() + vec2(padding, -(galley.size().y + padding + expansion));
             let text_rect = Rect::from_min_size(text_pos, galley.size());
 
             painter.rect_filled(
-                text_rect.expand(LABEL_BG_EXPANSION * config.zoom),
+                text_rect.expand(expansion),
                 egui::Rounding::same(FOLDER_CORNER_RADIUS * config.zoom),
                 Color32::from_black_alpha(COLOR_LABEL_BG_ALPHA),
             );

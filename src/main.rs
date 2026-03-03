@@ -384,6 +384,7 @@ impl MaBlocksApp {
             block.set_preferred_size(vec2(data.size[0], data.size[1]));
             block.chained = data.chained;
             block.counter = data.counter;
+            block.file_size = std::fs::metadata(&data.path).map(|m| m.len()).unwrap_or(0);
             // Note: we don't restore animation_enabled here - it will be set to false
             // and the user will need to click to load the full animation sequence on demand
 
@@ -427,6 +428,7 @@ impl MaBlocksApp {
             is_full,
         );
         block.pos.position = pos2(CANVAS_PADDING, CANVAS_PADDING);
+        block.file_size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         Ok(block)
     }
 
