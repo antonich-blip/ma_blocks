@@ -118,6 +118,22 @@
             # For wayland-client-sys and other -sys crates
             WAYLAND_PROTOCOLS_PATH = "${pkgs.wayland-protocols}";
             WAYLAND_SCANNER_PATH = "${pkgs.wayland-scanner}/bin/wayland-scanner";
+
+            # Runtime dlopen paths (winit, GL, etc. use dlopen at runtime)
+            LD_LIBRARY_PATH = with pkgs; lib.makeLibraryPath [
+              wayland
+              libxkbcommon
+              libx11
+              libxcursor
+              libxrandr
+              libxi
+              mesa
+              libGL
+              gtk3
+              dbus
+              dav1d
+              libaom
+            ];
           };
         });
 

@@ -389,6 +389,29 @@ mod avif_support {
         }
     }
 
+    /// Reads a 10/12-bit YUV plane from an `avifImage` as a `&[u16]` slice.
+    /// libavif stores high-bit-depth planes as u16 LE packed into a `*mut u8` buffer;
+    /// `yuvRowBytes` is in bytes, so the u16 stride is `yuvRowBytes / 2`.
+    ///
+    /// # Safety
+    /// `image` must be a valid, non-null pointer to a decoded `avifImage`.
+    /// The plane must contain u16 LE data (i.e. `depth` is 10 or 12).
+    /// `yuvRowBytes[plane_idx]` must be even (guaranteed by AVIF spec).
+    unsafe fn yuv_plane_slice_u16(
+        image: *const libavif_sys::avifImage,
+        plane_idx: usize,
+        row_count: u32,
+    ) -> &'static [u16] {
+        let ptr = (*image).yuvPlanes[plane_idx];
+        let row_bytes = (*image).yuvRowBytes[plane_idx] as usize;
+        if ptr.is_null() || row_bytes == 0 || row_count == 0 {
+            &[]
+        } else {
+            let stride_u16 = row_bytes / 2;
+            std::slice::from_raw_parts(ptr as *const u16, stride_u16 * row_count as usize)
+        }
+    }
+
     /// Attempts SIMD-accelerated YUV→RGBA conversion for 8-bit images.
     /// Returns `Err(())` for unsupported formats (caller should use the fallback).
     ///
@@ -408,10 +431,8 @@ mod avif_support {
             )
         };
 
-        // Only handle 8-bit for now; 10/12-bit is rare in practice and the
-        // fallback handles it correctly (though slower).
         if depth != 8 {
-            return Err(());
+            return convert_yuv_to_rgba_simd_p16(image, width, height, depth, fmt, range, mc);
         }
 
         let yuv_range = map_range(range);
@@ -587,6 +608,173 @@ mod avif_support {
             }
         }
         Ok(())
+    }
+
+    /// SIMD-accelerated YUV→RGBA for 10-bit and 12-bit AVIF images.
+    /// Returns `Err(())` for formats not covered by the `yuv` crate (caller falls back to libavif).
+    ///
+    /// Covered:
+    ///   - 4:2:0 10-bit (`i010_to_rgba`), 12-bit (`i012_to_rgba`)
+    ///   - 4:2:2 10-bit (`i210_to_rgba`), 12-bit (`i212_to_rgba`)
+    ///   - 4:4:4 10-bit (`i410_to_rgba`)
+    ///
+    /// Falls back (returns `Err`): 4:4:4 12-bit, 4:0:0, YCgCo (mc=8), Identity/GBR (mc=0),
+    /// and any matrix without precomputed 10/12-bit coefficients in the yuv crate (Bt470_6,
+    /// Fcc, Smpte240). The yuv crate's on-the-fly coefficient path for 10/12-bit has a
+    /// bug where `range_bgra` receives `BIT_DEPTH` instead of 255, making y_coef ~80x too
+    /// small. Only matrices with precomputed entries (Bt601, Bt709, Bt2020) are safe.
+    fn convert_yuv_to_rgba_simd_p16(
+        image: *const libavif_sys::avifImage,
+        width: u32,
+        height: u32,
+        depth: u32,
+        fmt: libavif_sys::avifPixelFormat,
+        range: libavif_sys::avifRange,
+        mc: u16,
+    ) -> Result<Vec<u8>, ()> {
+        // YCgCo and Identity/GBR have no p16 decode functions in the yuv crate.
+        if mc as u32 == 0 || mc as u32 == 8 {
+            return Err(());
+        }
+        // 4:4:4 12-bit: no i412 in yuv 0.8 — fall back.
+        if fmt == libavif_sys::AVIF_PIXEL_FORMAT_YUV444 && depth == 12 {
+            return Err(());
+        }
+        // Monochrome: no yuv-crate path for p16→rgba8 — fall back.
+        if fmt == libavif_sys::AVIF_PIXEL_FORMAT_YUV400 {
+            return Err(());
+        }
+
+        // Only Bt601/Bt709/Bt2020 have precomputed 10/12-bit inverse coefficients.
+        // Other matrices (Bt470_6 mc=5, Fcc mc=4, Smpte240 mc=7) trigger a buggy
+        // on-the-fly code path in the yuv crate that uses BIT_DEPTH instead of 255
+        // as range_bgra, producing y_coef ~80x too small and near-zero output.
+        let matrix = match mc as u32 {
+            1 => yuv::YuvStandardMatrix::Bt709,
+            2 | 6 => yuv::YuvStandardMatrix::Bt601,
+            9 | 10 => yuv::YuvStandardMatrix::Bt2020,
+            _ => return Err(()),
+        };
+        let yuv_range = map_range(range);
+        let rgba_stride = width * 4;
+        let mut rgba = vec![0u8; (width * height * 4) as usize];
+
+        // SAFETY: image planes are valid after avifDecoderNextImage.
+        // yuvRowBytes are in bytes; divide by 2 for u16 stride (even by AVIF spec).
+        unsafe {
+            match (fmt, depth) {
+                (libavif_sys::AVIF_PIXEL_FORMAT_YUV420, 10) => {
+                    let ch = (height + 1) / 2;
+                    let planar = yuv::YuvPlanarImage {
+                        y_plane: yuv_plane_slice_u16(image, 0, height),
+                        y_stride: (*image).yuvRowBytes[0] / 2,
+                        u_plane: yuv_plane_slice_u16(image, 1, ch),
+                        u_stride: (*image).yuvRowBytes[1] / 2,
+                        v_plane: yuv_plane_slice_u16(image, 2, ch),
+                        v_stride: (*image).yuvRowBytes[2] / 2,
+                        width,
+                        height,
+                    };
+                    yuv::i010_to_rgba(&planar, &mut rgba, rgba_stride, yuv_range, matrix)
+                        .map_err(|_| ())?;
+                }
+                (libavif_sys::AVIF_PIXEL_FORMAT_YUV420, 12) => {
+                    let ch = (height + 1) / 2;
+                    let planar = yuv::YuvPlanarImage {
+                        y_plane: yuv_plane_slice_u16(image, 0, height),
+                        y_stride: (*image).yuvRowBytes[0] / 2,
+                        u_plane: yuv_plane_slice_u16(image, 1, ch),
+                        u_stride: (*image).yuvRowBytes[1] / 2,
+                        v_plane: yuv_plane_slice_u16(image, 2, ch),
+                        v_stride: (*image).yuvRowBytes[2] / 2,
+                        width,
+                        height,
+                    };
+                    yuv::i012_to_rgba(&planar, &mut rgba, rgba_stride, yuv_range, matrix)
+                        .map_err(|_| ())?;
+                }
+                (libavif_sys::AVIF_PIXEL_FORMAT_YUV422, 10) => {
+                    let planar = yuv::YuvPlanarImage {
+                        y_plane: yuv_plane_slice_u16(image, 0, height),
+                        y_stride: (*image).yuvRowBytes[0] / 2,
+                        u_plane: yuv_plane_slice_u16(image, 1, height),
+                        u_stride: (*image).yuvRowBytes[1] / 2,
+                        v_plane: yuv_plane_slice_u16(image, 2, height),
+                        v_stride: (*image).yuvRowBytes[2] / 2,
+                        width,
+                        height,
+                    };
+                    yuv::i210_to_rgba(&planar, &mut rgba, rgba_stride, yuv_range, matrix)
+                        .map_err(|_| ())?;
+                }
+                (libavif_sys::AVIF_PIXEL_FORMAT_YUV422, 12) => {
+                    let planar = yuv::YuvPlanarImage {
+                        y_plane: yuv_plane_slice_u16(image, 0, height),
+                        y_stride: (*image).yuvRowBytes[0] / 2,
+                        u_plane: yuv_plane_slice_u16(image, 1, height),
+                        u_stride: (*image).yuvRowBytes[1] / 2,
+                        v_plane: yuv_plane_slice_u16(image, 2, height),
+                        v_stride: (*image).yuvRowBytes[2] / 2,
+                        width,
+                        height,
+                    };
+                    yuv::i212_to_rgba(&planar, &mut rgba, rgba_stride, yuv_range, matrix)
+                        .map_err(|_| ())?;
+                }
+                (libavif_sys::AVIF_PIXEL_FORMAT_YUV444, 10) => {
+                    let planar = yuv::YuvPlanarImage {
+                        y_plane: yuv_plane_slice_u16(image, 0, height),
+                        y_stride: (*image).yuvRowBytes[0] / 2,
+                        u_plane: yuv_plane_slice_u16(image, 1, height),
+                        u_stride: (*image).yuvRowBytes[1] / 2,
+                        v_plane: yuv_plane_slice_u16(image, 2, height),
+                        v_stride: (*image).yuvRowBytes[2] / 2,
+                        width,
+                        height,
+                    };
+                    yuv::i410_to_rgba(&planar, &mut rgba, rgba_stride, yuv_range, matrix)
+                        .map_err(|_| ())?;
+                }
+                _ => return Err(()),
+            }
+        }
+
+        apply_alpha_16bit(image, &mut rgba, width, height, depth);
+        Ok(rgba)
+    }
+
+    /// Composites a 10/12-bit alpha plane onto an RGBA8 buffer.
+    /// Alpha samples are u16 LE; shifted right by `(depth - 8)` to produce u8.
+    /// If no alpha plane is present, sets all alpha bytes to 255 (fully opaque).
+    fn apply_alpha_16bit(
+        image: *const libavif_sys::avifImage,
+        rgba: &mut [u8],
+        width: u32,
+        height: u32,
+        depth: u32,
+    ) {
+        // SAFETY: image is a valid pointer from the decoder.
+        let (alpha_ptr, alpha_row_bytes) = unsafe { ((*image).alphaPlane, (*image).alphaRowBytes) };
+
+        if alpha_ptr.is_null() || alpha_row_bytes == 0 {
+            for pixel in rgba.chunks_exact_mut(4) {
+                pixel[3] = 255;
+            }
+        } else {
+            let shift = depth - 8; // 10-bit → >>2, 12-bit → >>4
+            let stride_u16 = (alpha_row_bytes / 2) as usize;
+            // SAFETY: alpha_ptr points to u16 LE samples; alpha_row_bytes is even (AVIF spec).
+            let alpha_u16 = unsafe {
+                std::slice::from_raw_parts(alpha_ptr as *const u16, stride_u16 * height as usize)
+            };
+            for y in 0..height as usize {
+                let alpha_row = y * stride_u16;
+                let rgba_row = y * width as usize * 4;
+                for x in 0..width as usize {
+                    rgba[rgba_row + x * 4 + 3] = (alpha_u16[alpha_row + x] >> shift) as u8;
+                }
+            }
+        }
     }
 
     /// Composites the alpha plane from an `avifImage` onto an RGBA buffer.

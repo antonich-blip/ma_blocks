@@ -111,7 +111,7 @@ yuv = "0.8"      # SIMD YUV->RGB conversion
 | Opportunity | Effort | Expected Impact | Notes |
 |-------------|--------|-----------------|-------|
 | Streaming frame decode | 1 week | Instant animation start for long sequences | Keep decoder alive, decode on-demand. Complex state management. |
-| 10/12-bit SIMD path | 1-2 days | 5-7x faster for HDR content | `yuv` crate supports it; need to cast plane pointers to `&[u16]` |
+| ~~10/12-bit SIMD path~~ | ~~1-2 days~~ | ~~5-7x faster for HDR content~~ | Completed: `yuv_plane_slice_u16` + `convert_yuv_to_rgba_simd_p16` + `apply_alpha_16bit`. Covers 4:2:0/4:2:2 10+12-bit and 4:4:4 10-bit. Fallback retained for 4:4:4 12-bit, 4:0:0, YCgCo, GBR. |
 | Hardware accel via ffmpeg | 2-4 weeks | 3-5x where GPU available | High complexity, platform-specific. Questionable ROI for canvas app. |
 
 ---
