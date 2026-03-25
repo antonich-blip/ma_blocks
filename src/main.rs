@@ -1017,10 +1017,8 @@ impl MaBlocksApp {
                 self.toggle_chain_for_block(index);
             } else if hover_state.counter_hovered {
                 let block = self.block_manager.get_by_index_mut(index).unwrap();
-                if block.counter == 0 {
-                    block.counter_start_day = crate::block::current_weekday();
-                }
                 block.counter += 1;
+                block.counter_start_day = crate::block::current_weekday();
                 skip_chain_cancel = true;
             }
         }
@@ -1028,6 +1026,9 @@ impl MaBlocksApp {
         if input.secondary_clicked && hover_state.counter_hovered {
             let block = self.block_manager.get_by_index_mut(index).unwrap();
             block.counter = (block.counter - 1).max(0);
+            if block.counter > 0 {
+                block.counter_start_day = crate::block::current_weekday();
+            }
             skip_chain_cancel = true;
         }
 
