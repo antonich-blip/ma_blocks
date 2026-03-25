@@ -1,3 +1,5 @@
+claude --resume ffa9f56b-306d-4dea-a786-02f3d3dd9fcf
+
 # MaBlocks2 Refactoring Log
 
 ## Codebase Overview

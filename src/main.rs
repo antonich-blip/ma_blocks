@@ -76,6 +76,8 @@ struct BlockData {
     animation_enabled: bool,
     counter: i32,
     #[serde(default)]
+    counter_start_day: u8,
+    #[serde(default)]
     is_group: bool,
     #[serde(default)]
     group_name: String,
@@ -384,6 +386,7 @@ impl MaBlocksApp {
             block.set_preferred_size(vec2(data.size[0], data.size[1]));
             block.chained = data.chained;
             block.counter = data.counter;
+            block.counter_start_day = data.counter_start_day;
             block.file_size = std::fs::metadata(&data.path).map(|m| m.len()).unwrap_or(0);
             // Note: we don't restore animation_enabled here - it will be set to false
             // and the user will need to click to load the full animation sequence on demand
@@ -1013,7 +1016,11 @@ impl MaBlocksApp {
             if hover_state.chain_hovered {
                 self.toggle_chain_for_block(index);
             } else if hover_state.counter_hovered {
-                self.block_manager.get_by_index_mut(index).unwrap().counter += 1;
+                let block = self.block_manager.get_by_index_mut(index).unwrap();
+                if block.counter == 0 {
+                    block.counter_start_day = crate::block::current_weekday();
+                }
+                block.counter += 1;
                 skip_chain_cancel = true;
             }
         }
@@ -1206,6 +1213,7 @@ impl MaBlocksApp {
             chained: b.chained,
             animation_enabled: b.anim.animation_enabled,
             counter: b.counter,
+            counter_start_day: b.counter_start_day,
             is_group: b.group.is_group,
             group_name: b.group.group_name.clone(),
             color: b.color.to_array(),

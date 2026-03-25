@@ -2,8 +2,8 @@ use crate::constants::{
     BLOCK_CORNER_RADIUS, BLOCK_PADDING, BUTTON_BASE_SIZE, BUTTON_HIT_AREA_MULTIPLIER,
     BUTTON_ICON_FONT_SIZE, BUTTON_SPACING, COLOR_CHAINED_GROUP_BG, COLOR_CHAIN_ACTIVE,
     COLOR_CHAIN_DISABLED, COLOR_CHAIN_HOVER, COLOR_CHAIN_NORMAL, COLOR_CLOSE_BUTTON,
-    COLOR_CLOSE_BUTTON_HOVER, COLOR_COUNTER_BADGE, COLOR_COUNTER_BUTTON,
-    COLOR_COUNTER_BUTTON_HOVER, COLOR_LABEL_BG_ALPHA, COLOR_NORMAL_GROUP_BG, COUNTER_BADGE_OFFSET,
+    COLOR_CLOSE_BUTTON_HOVER, COLOR_COUNTER_BADGE_TODAY, COLOR_COUNTER_BUTTON,
+    COLOR_COUNTER_BUTTON_HOVER, COUNTER_BADGE_DAY_COLORS, COLOR_LABEL_BG_ALPHA, COLOR_NORMAL_GROUP_BG, COUNTER_BADGE_OFFSET,
     COUNTER_BADGE_RADIUS, COUNTER_FONT_SIZE, DEFAULT_GROUP_SIZE, FOLDER_CORNER_RADIUS,
     FOLDER_PREVIEW_SCALE, FOLDER_TAB_CORNER_RADIUS, FOLDER_TAB_HEIGHT, FOLDER_TAB_WIDTH_RATIO,
     GROUP_TEXTURE_SCALE, LABEL_BG_EXPANSION, LABEL_FONT_SIZE, LABEL_PADDING, MIN_BLOCK_SIZE,
@@ -14,7 +14,7 @@ use crate::image_loader::AnimationFrame;
 use eframe::egui::{self, pos2, vec2, Align2, Color32, FontId, Pos2, Rect, Vec2};
 use std::cmp::Ordering;
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 /// Defines the four corners of a block that can be used for resizing.
@@ -114,6 +114,17 @@ pub fn block_control_rects(rect: Rect, zoom: f32) -> (Rect, Rect, Rect) {
     (close_rect, chain_rect, counter_rect)
 }
 
+/// Returns the current weekday as 0=Mon … 6=Sun, using the Unix epoch offset.
+pub fn current_weekday() -> u8 {
+    let days = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        / 86400;
+    // Epoch (1970-01-01) was a Thursday → index 3 (Mon=0)
+    ((days + 3) % 7) as u8
+}
+
 /// The core entity of the application, representing an image or a group of images.
 /// It handles its own rendering, animation state, and interaction properties.
 pub struct ImageBlock {
@@ -129,6 +140,8 @@ pub struct ImageBlock {
     pub color: egui::Color32,
     pub chained: bool,
     pub counter: i32,
+    /// Weekday (0=Mon … 6=Sun) when the counter was first incremented; drives badge colour.
+    pub counter_start_day: u8,
     pub is_full_sequence: bool,
     pub file_size: u64,
 }
@@ -189,6 +202,7 @@ impl ImageBlock {
             color,
             chained: false,
             counter: 0,
+            counter_start_day: 0,
             is_full_sequence,
             file_size: 0,
         }
@@ -232,6 +246,7 @@ impl ImageBlock {
             color,
             chained: false,
             counter: 0,
+            counter_start_day: 0,
             is_full_sequence: true,
             file_size: 0,
         }
@@ -602,7 +617,12 @@ impl ImageBlock {
                 rect.min.x + circle_radius + COUNTER_BADGE_OFFSET * config.zoom,
                 rect.min.y + circle_radius + COUNTER_BADGE_OFFSET * config.zoom,
             );
-            painter.circle_filled(circle_center, circle_radius, COLOR_COUNTER_BADGE);
+            let badge_color = if self.counter_start_day == current_weekday() {
+                COLOR_COUNTER_BADGE_TODAY
+            } else {
+                COUNTER_BADGE_DAY_COLORS[self.counter_start_day as usize % 7]
+            };
+            painter.circle_filled(circle_center, circle_radius, badge_color);
             painter.text(
                 circle_center,
                 Align2::CENTER_CENTER,

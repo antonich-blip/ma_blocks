@@ -174,8 +174,19 @@ pub const COLOR_COUNTER_BUTTON_HOVER: Color32 = Color32::from_rgb(0, 150, 0);
 /// Counter button color in normal state.
 pub const COLOR_COUNTER_BUTTON: Color32 = Color32::from_rgb(0, 100, 0);
 
-/// Counter badge background color (semi-transparent).
-pub const COLOR_COUNTER_BADGE: Color32 = Color32::from_rgba_premultiplied(0, 100, 0, 170);
+/// Counter badge color when the counter was started today (overrides the weekday colour).
+pub const COLOR_COUNTER_BADGE_TODAY: Color32 = Color32::from_rgba_premultiplied(220, 220, 220, 210);
+
+/// Counter badge colors by weekday (Mon=0 … Sun=6), semi-transparent.
+pub const COUNTER_BADGE_DAY_COLORS: [Color32; 7] = [
+    Color32::from_rgba_premultiplied(180, 40, 40, 200),  // Mon — red
+    Color32::from_rgba_premultiplied(180, 110, 20, 200), // Tue — orange
+    Color32::from_rgba_premultiplied(160, 160, 0, 200),  // Wed — yellow
+    Color32::from_rgba_premultiplied(30, 140, 30, 200),  // Thu — green
+    Color32::from_rgba_premultiplied(20, 80, 180, 200),  // Fri — blue
+    Color32::from_rgba_premultiplied(100, 30, 170, 200), // Sat — violet
+    Color32::from_rgba_premultiplied(140, 30, 110, 200), // Sun — magenta
+];
 
 // =============================================================================
 // COLORS - TEXT AND LABELS
