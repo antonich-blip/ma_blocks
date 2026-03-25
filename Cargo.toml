@@ -24,3 +24,8 @@ rfd = { version = "0.15", features = ["xdg-portal"] }
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 eframe = { version = "0.29.1", features = ["glow", "persistence"] }
 rfd = { version = "0.15" }
+
+[profile.release]
+lto = true
+strip = true
+opt-level = "s"

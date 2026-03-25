@@ -66,21 +66,14 @@
               # Graphics/OpenGL
               mesa
               libGL
-              libGLU
               libepoxy
-              
-              # GTK and DBus (for file dialogs via rfd)
-              gtk3
-              dbus
-              libdbusmenu
               
               # SSL
               openssl
               
               # AVIF image support libraries
               dav1d
-              libaom
-              
+
               # Other image libraries (runtime deps)
               libpng
               libjpeg
@@ -129,10 +122,7 @@
               libxi
               mesa
               libGL
-              gtk3
-              dbus
               dav1d
-              libaom
             ];
           };
         });
@@ -157,12 +147,8 @@
             libxinerama
             mesa
             libGL
-            libGLU
-            gtk3
-            dbus
             openssl
             dav1d
-            libaom
             libpng
             libjpeg
             libwebp
@@ -212,7 +198,8 @@
             installPhase = ''
               mkdir -p $out/bin
               cp target/release/ma_blocks2 $out/bin/
-              
+              strip $out/bin/ma_blocks2
+
               wrapProgram $out/bin/ma_blocks2 \
                 --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath runtimeLibs}" \
                 --set WAYLAND_PROTOCOLS_PATH "${pkgs.wayland-protocols}" \
