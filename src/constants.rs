@@ -175,7 +175,7 @@ pub const COLOR_COUNTER_BUTTON_HOVER: Color32 = Color32::from_rgb(0, 150, 0);
 pub const COLOR_COUNTER_BUTTON: Color32 = Color32::from_rgb(0, 100, 0);
 
 /// Counter badge color when the counter was started today (overrides the weekday colour).
-pub const COLOR_COUNTER_BADGE_TODAY: Color32 = Color32::from_rgba_premultiplied(220, 220, 220, 210);
+pub const COLOR_COUNTER_BADGE_TODAY: Color32 = Color32::from_rgba_premultiplied(0, 160, 160, 210);
 
 /// Counter badge colors by weekday (Mon=0 … Sun=6), semi-transparent.
 pub const COUNTER_BADGE_DAY_COLORS: [Color32; 7] = [
