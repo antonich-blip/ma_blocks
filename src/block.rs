@@ -114,15 +114,19 @@ pub fn block_control_rects(rect: Rect, zoom: f32) -> (Rect, Rect, Rect) {
     (close_rect, chain_rect, counter_rect)
 }
 
-/// Returns the current weekday as 0=Mon … 6=Sun, using the Unix epoch offset.
-pub fn current_weekday() -> u8 {
-    let days = SystemTime::now()
+/// Returns days since Unix epoch — used as an absolute "today" stamp.
+pub fn current_day() -> u32 {
+    (SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
-        / 86400;
-    // Epoch (1970-01-01) was a Thursday → index 3 (Mon=0)
-    ((days + 3) % 7) as u8
+        / 86400) as u32
+}
+
+/// Returns the weekday index (Mon=0 … Sun=6) for a given absolute day number.
+pub fn weekday_of(day: u32) -> usize {
+    // Epoch (1970-01-01) was a Thursday → offset 3 from Mon=0
+    ((day + 3) % 7) as usize
 }
 
 /// The core entity of the application, representing an image or a group of images.
@@ -140,8 +144,8 @@ pub struct ImageBlock {
     pub color: egui::Color32,
     pub chained: bool,
     pub counter: i32,
-    /// Weekday (0=Mon … 6=Sun) when the counter was first incremented; drives badge colour.
-    pub counter_start_day: u8,
+    /// Absolute day (days since Unix epoch) when the counter was last modified; drives badge colour.
+    pub counter_start_day: u32,
     pub is_full_sequence: bool,
     pub file_size: u64,
 }
@@ -617,10 +621,10 @@ impl ImageBlock {
                 rect.min.x + circle_radius + COUNTER_BADGE_OFFSET * config.zoom,
                 rect.min.y + circle_radius + COUNTER_BADGE_OFFSET * config.zoom,
             );
-            let badge_color = if self.counter_start_day == current_weekday() {
+            let badge_color = if self.counter_start_day == current_day() {
                 COLOR_COUNTER_BADGE_TODAY
             } else {
-                COUNTER_BADGE_DAY_COLORS[self.counter_start_day as usize % 7]
+                COUNTER_BADGE_DAY_COLORS[weekday_of(current_day())]
             };
             painter.circle_filled(circle_center, circle_radius, badge_color);
             painter.text(

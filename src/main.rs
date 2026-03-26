@@ -76,7 +76,7 @@ struct BlockData {
     animation_enabled: bool,
     counter: i32,
     #[serde(default)]
-    counter_start_day: u8,
+    counter_start_day: u32,
     #[serde(default)]
     is_group: bool,
     #[serde(default)]
@@ -1018,7 +1018,7 @@ impl MaBlocksApp {
             } else if hover_state.counter_hovered {
                 let block = self.block_manager.get_by_index_mut(index).unwrap();
                 block.counter += 1;
-                block.counter_start_day = crate::block::current_weekday();
+                block.counter_start_day = crate::block::current_day();
                 skip_chain_cancel = true;
             }
         }
@@ -1027,7 +1027,7 @@ impl MaBlocksApp {
             let block = self.block_manager.get_by_index_mut(index).unwrap();
             block.counter = (block.counter - 1).max(0);
             if block.counter > 0 {
-                block.counter_start_day = crate::block::current_weekday();
+                block.counter_start_day = crate::block::current_day();
             }
             skip_chain_cancel = true;
         }
