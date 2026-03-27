@@ -2,6 +2,7 @@ claude --resume ffa9f56b-306d-4dea-a786-02f3d3dd9fcf
 claude --resume 86d0aaff-97f6-4907-ac4b-9a738c92ef9f (bubbles)
 claude --resume 0836cd05-8f5b-4286-97df-46cad78a2311 (downsizing nixos wrap/package)
 claude --resume 47134010-1e31-4274-a989-0505565a036b (video format implementation)
+claude --resume 44f32224-d7ce-494d-9fc6-a82a5b9403ae  (group/chain remove)
 
 # MaBlocks2 Refactoring Log
 

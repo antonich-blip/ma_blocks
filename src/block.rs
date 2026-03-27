@@ -624,7 +624,7 @@ impl ImageBlock {
             let badge_color = if self.counter_start_day == current_day() {
                 COLOR_COUNTER_BADGE_TODAY
             } else {
-                COUNTER_BADGE_DAY_COLORS[weekday_of(current_day())]
+                COUNTER_BADGE_DAY_COLORS[weekday_of(self.counter_start_day)]
             };
             painter.circle_filled(circle_center, circle_radius, badge_color);
             painter.text(

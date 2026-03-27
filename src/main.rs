@@ -858,11 +858,8 @@ impl MaBlocksApp {
                             self.handle_block_click(index, input.ctrl);
                         }
 
-                        if remove_cascade {
+                        if remove_cascade || remove_single {
                             self.block_manager.remove_cascade(index);
-                            should_reflow = true;
-                        } else if remove_single {
-                            self.block_manager.remove_with_children(index);
                             should_reflow = true;
                         }
                     }
