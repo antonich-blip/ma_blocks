@@ -11,6 +11,7 @@ image = { version = "0.25", features = ["jpeg", "png", "gif", "webp", "avif"] }
 libavif-sys = { version = "0.13", default-features = false, features = ["codec-dav1d"] }
 log = "0.4.29"
 rayon = "1.10"
+ffmpeg-next = { version = "8", default-features = false, features = ["codec", "format", "software-scaling"] }
 yuv = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

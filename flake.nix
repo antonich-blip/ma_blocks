@@ -74,6 +74,10 @@
               # AVIF image support libraries
               dav1d
 
+              # Video support (ffmpeg-next crate)
+              ffmpeg
+              ffmpeg.dev
+
               # Other image libraries (runtime deps)
               libpng
               libjpeg
@@ -106,6 +110,7 @@
               gtk3.dev
               openssl.dev
               libx11.dev
+              ffmpeg.dev
             ];
             
             # For wayland-client-sys and other -sys crates
@@ -123,6 +128,7 @@
               mesa
               libGL
               dav1d
+              ffmpeg
             ];
           };
         });
@@ -152,6 +158,7 @@
             libpng
             libjpeg
             libwebp
+            ffmpeg
           ];
         in
         {
