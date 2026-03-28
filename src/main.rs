@@ -29,6 +29,9 @@ use uuid::Uuid;
 fn main() -> eframe::Result<()> {
     env_logger::init();
     ffmpeg_next::init().expect("ffmpeg init failed");
+    // Suppress ffmpeg's noisy stderr (e.g. Opus audio parser warnings from
+    // WebM files — we ignore audio tracks entirely).
+    ffmpeg_next::util::log::set_level(ffmpeg_next::util::log::Level::Fatal);
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
