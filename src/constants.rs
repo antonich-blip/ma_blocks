@@ -41,7 +41,7 @@ pub const MAX_BLOCK_DIMENSION: f32 = 420.0;
 pub const MIN_CANVAS_INNER_WIDTH: f32 = MIN_BLOCK_SIZE + BLOCK_PADDING * 2.0;
 
 /// Maximum number of animations to keep in memory simultaneously.
-pub const MAX_CACHED_ANIMATIONS: usize = 20;
+pub const MAX_CACHED_ANIMATIONS: usize = 10;
 
 // =============================================================================
 // WINDOW CONSTANTS
