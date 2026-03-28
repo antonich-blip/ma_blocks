@@ -127,7 +127,7 @@ pub fn load_video_first_frame(path: &Path) -> Result<crate::image_loader::Loaded
                 .run(&raw, &mut rgba)
                 .map_err(|e| format!("Scale first frame: {e}"))?;
 
-            let ci = rgba_frame_to_color_image(&rgba, width, height);
+            let ci = rgba_frame_to_color_image(&rgba);
             return Ok(crate::image_loader::LoadedImage::from_frames(
                 vec![crate::image_loader::AnimationFrame {
                     image: ci,
@@ -239,7 +239,7 @@ fn decoder_thread(
                     continue;
                 }
                 seq += 1;
-                let ci = rgba_frame_to_color_image(&rgba, width, height);
+                let ci = rgba_frame_to_color_image(&rgba);
                 if let Ok(mut guard) = latest_frame.lock() {
                     *guard = Some(DecodedVideoFrame { image: ci, seq });
                 }
@@ -271,11 +271,30 @@ fn frame_duration_from_stream(stream: &ffmpeg_next::format::stream::Stream) -> D
     }
 }
 
-fn rgba_frame_to_color_image(
-    rgba: &ffmpeg_next::frame::Video,
-    width: u32,
-    height: u32,
-) -> ColorImage {
+/// Converts an ffmpeg RGBA frame to egui ColorImage, handling row-stride padding.
+///
+/// ffmpeg aligns each row to a multiple of 32+ bytes, so `data(0)` may be
+/// larger than `width * height * 4`. We copy row-by-row to strip padding.
+/// Dimensions are read from the frame itself (not the decoder) to handle
+/// coded-vs-display size differences in VP9/H.264.
+fn rgba_frame_to_color_image(rgba: &ffmpeg_next::frame::Video) -> ColorImage {
+    let width = rgba.width() as usize;
+    let height = rgba.height() as usize;
+    let stride = rgba.stride(0);
+    let row_bytes = width * 4;
     let data = rgba.data(0);
-    ColorImage::from_rgba_unmultiplied([width as usize, height as usize], data)
+
+    if stride == row_bytes {
+        // No padding — fast path.
+        ColorImage::from_rgba_unmultiplied([width, height], data)
+    } else {
+        // Strip per-row alignment padding.
+        let mut packed = vec![0u8; row_bytes * height];
+        for row in 0..height {
+            let src = row * stride;
+            let dst = row * row_bytes;
+            packed[dst..dst + row_bytes].copy_from_slice(&data[src..src + row_bytes]);
+        }
+        ColorImage::from_rgba_unmultiplied([width, height], &packed)
+    }
 }
