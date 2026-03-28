@@ -65,7 +65,7 @@ pub fn spawn_video_decoder(path: PathBuf, first_frame: ColorImage) -> VideoBlock
     let first_frame_bg = first_frame.clone();
 
     std::thread::spawn(move || {
-        decoder_thread(path, cmd_rx, latest_frame_bg, first_frame_bg);
+        decoder_thread(path, frame_duration, cmd_rx, latest_frame_bg, first_frame_bg);
     });
 
     VideoBlockHandle {
@@ -148,11 +148,13 @@ pub fn load_video_first_frame(path: &Path) -> Result<crate::image_loader::Loaded
 
 fn decoder_thread(
     path: PathBuf,
+    frame_duration: Duration,
     cmd_rx: std::sync::mpsc::Receiver<StreamCmd>,
     latest_frame: Arc<Mutex<Option<DecodedVideoFrame>>>,
     _first_frame: ColorImage,
 ) {
     use std::sync::mpsc::TryRecvError;
+    use std::time::Instant;
 
     let mut playing = false;
     let mut seq: u64 = 0;
@@ -218,6 +220,9 @@ fn decoder_thread(
         // Reuse allocations across frames.
         let mut raw = ffmpeg_next::frame::Video::empty();
         let mut rgba = ffmpeg_next::frame::Video::empty();
+        // Track when the last frame was emitted so we can sleep the remainder
+        // of the frame interval and avoid running at CPU decode speed.
+        let mut next_frame_at = Instant::now();
 
         for (stream, packet) in input.packets() {
             // Check for commands between packets (non-blocking).
@@ -240,6 +245,19 @@ fn decoder_thread(
                 if scaler.run(&raw, &mut rgba).is_err() {
                     continue;
                 }
+                // Sleep until the next frame's scheduled display time,
+                // keeping playback at the correct rate without drift.
+                let now = Instant::now();
+                if next_frame_at > now {
+                    std::thread::sleep(next_frame_at - now);
+                }
+                next_frame_at += frame_duration;
+                // If we've fallen more than one frame behind (e.g. after a pause),
+                // reset the schedule to avoid a catch-up burst.
+                if next_frame_at < Instant::now() {
+                    next_frame_at = Instant::now() + frame_duration;
+                }
+
                 seq += 1;
                 let ci = rgba_frame_to_color_image(&rgba);
                 if let Ok(mut guard) = latest_frame.lock() {
