@@ -98,16 +98,17 @@ pub fn load_video_first_frame(path: &Path) -> Result<crate::image_loader::Loaded
         .video()
         .map_err(|e| format!("Video decoder: {e}"))?;
 
-    let (width, height) = (decoder.width(), decoder.height());
+    let (src_w, src_h) = (decoder.width(), decoder.height());
     let src_fmt = decoder.format();
+    let (out_w, out_h) = scaled_output_dims(src_w, src_h);
 
     let mut scaler = ff::software::scaling::context::Context::get(
         src_fmt,
-        width,
-        height,
+        src_w,
+        src_h,
         ff::format::pixel::Pixel::RGBA,
-        width,
-        height,
+        out_w,
+        out_h,
         ff::software::scaling::flag::Flags::BILINEAR,
     )
     .map_err(|e| format!("Scaler: {e}"))?;
@@ -194,16 +195,17 @@ fn decoder_thread(
                 }
             };
 
-        let (width, height) = (decoder.width(), decoder.height());
+        let (src_w, src_h) = (decoder.width(), decoder.height());
         let src_fmt = decoder.format();
+        let (out_w, out_h) = scaled_output_dims(src_w, src_h);
 
         let mut scaler = match ffmpeg_next::software::scaling::context::Context::get(
             src_fmt,
-            width,
-            height,
+            src_w,
+            src_h,
             ffmpeg_next::format::pixel::Pixel::RGBA,
-            width,
-            height,
+            out_w,
+            out_h,
             ffmpeg_next::software::scaling::flag::Flags::BILINEAR,
         ) {
             Ok(s) => s,
@@ -253,6 +255,22 @@ fn decoder_thread(
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
+
+/// Computes output (width, height) after capping the longer side to MAX_BLOCK_DIMENSION,
+/// preserving aspect ratio. Matches the downscaling applied to GIF/WebP/AVIF frames.
+fn scaled_output_dims(src_w: u32, src_h: u32) -> (u32, u32) {
+    let max = crate::constants::MAX_BLOCK_DIMENSION as u32;
+    if src_w <= max && src_h <= max {
+        return (src_w, src_h);
+    }
+    if src_w >= src_h {
+        let h = (src_h * max / src_w).max(1);
+        (max, h)
+    } else {
+        let w = (src_w * max / src_h).max(1);
+        (w, max)
+    }
+}
 
 /// Probes a video file to determine the nominal frame duration.
 /// Returns None on any error; callers should substitute a default.
