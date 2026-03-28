@@ -3,6 +3,7 @@ mod block_manager;
 mod constants;
 mod image_loader;
 mod paths;
+mod video_stream;
 
 use block::{
     block_control_rects, handle_blocks_resizing, BlockControlHover, BlockRenderConfig, ImageBlock,
@@ -27,6 +28,7 @@ use uuid::Uuid;
 
 fn main() -> eframe::Result<()> {
     env_logger::init();
+    ffmpeg_next::init().expect("ffmpeg init failed");
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -227,7 +229,7 @@ impl MaBlocksApp {
     /// Opens a file dialog to pick images and triggers background loading for each.
     fn load_images(&mut self) {
         let mut dialog = rfd::FileDialog::new()
-            .add_filter("Images", &["png", "jpg", "jpeg", "gif", "webp", "avif"]);
+            .add_filter("Images", &["png", "jpg", "jpeg", "gif", "webp", "avif", "webm", "mp4"]);
 
         if let Some(ref p) = self.paths {
             dialog = dialog.set_directory(&p.images);
@@ -985,7 +987,27 @@ impl MaBlocksApp {
 
         if !block.is_full_sequence {
             let path = PathBuf::from(&block.path);
-            self.trigger_image_load(path, false);
+            if video_stream::is_video_format(&path) {
+                // Grab first frame before taking mutable borrow.
+                let first_frame = self.block_manager
+                    .get_by_index(index)
+                    .and_then(|b| b.anim.frames.first())
+                    .map(|f| f.image.clone());
+
+                if let Some(first_frame) = first_frame {
+                    let handle = video_stream::spawn_video_decoder(path, first_frame);
+                    handle.cmd_tx.send(video_stream::StreamCmd::Play).ok();
+                    let block = self.block_manager.get_by_index_mut(index).unwrap();
+                    block.anim.video = Some(handle);
+                    block.anim.has_animation = true;
+                    block.is_full_sequence = true;
+                    block.anim.animation_enabled = true;
+                    let id = block.id;
+                    self.block_manager.mark_animation_used(id);
+                }
+            } else {
+                self.trigger_image_load(path, false);
+            }
         } else {
             let block = self.block_manager.get_by_index_mut(index).unwrap();
             block.toggle_animation();

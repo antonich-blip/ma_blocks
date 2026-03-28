@@ -53,6 +53,11 @@ pub struct AnimationState {
     pub frame_elapsed: Duration,
     pub animation_enabled: bool,
     pub has_animation: bool,
+    /// Streaming video decoder handle. Some only for video-format blocks while playing.
+    /// When Some, `frames` always contains exactly one entry (the first frame).
+    pub video: Option<crate::video_stream::VideoBlockHandle>,
+    /// Tracks the last video frame seq consumed, to detect new frames from the decoder.
+    pub video_seq: u64,
 }
 
 /// Manages group-related data when multiple blocks are combined.
@@ -193,6 +198,8 @@ impl ImageBlock {
                 frame_elapsed: Duration::ZERO,
                 animation_enabled: false,
                 has_animation,
+                video: None,
+                video_seq: 0,
             },
             group: GroupData {
                 is_group: false,
@@ -237,6 +244,8 @@ impl ImageBlock {
                 frame_elapsed: Duration::ZERO,
                 animation_enabled: false,
                 has_animation: false,
+                video: None,
+                video_seq: 0,
             },
             group: GroupData {
                 is_group: true,
@@ -295,6 +304,25 @@ impl ImageBlock {
 
     /// Advances the animation state based on elapsed time. Returns true if the frame changed.
     pub fn update_animation(&mut self, dt: f32) -> bool {
+        // Video streaming path: check if a new frame arrived from the decoder thread.
+        if let Some(ref handle) = self.anim.video {
+            if !self.anim.animation_enabled {
+                return false;
+            }
+            if let Ok(guard) = handle.latest_frame.lock() {
+                if let Some(ref frame) = *guard {
+                    if frame.seq != self.anim.video_seq {
+                        self.anim.video_seq = frame.seq;
+                        self.texture
+                            .set(frame.image.clone(), egui::TextureOptions::LINEAR);
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        // Pre-decoded frames path (GIF / WebP / AVIF).
         if !self.anim.animation_enabled || self.anim.frames.len() <= 1 {
             return false;
         }
@@ -312,6 +340,13 @@ impl ImageBlock {
     }
 
     pub fn time_until_next_frame(&self) -> Option<Duration> {
+        if let Some(ref handle) = self.anim.video {
+            if self.anim.animation_enabled {
+                return Some(handle.frame_duration);
+            }
+            return None;
+        }
+
         if !self.anim.animation_enabled || self.anim.frames.len() <= 1 {
             return None;
         }
@@ -326,6 +361,19 @@ impl ImageBlock {
     }
 
     pub fn toggle_animation(&mut self) {
+        // Video path: frames.len() is always 1, so guard must check video first.
+        if self.anim.video.is_some() {
+            self.anim.animation_enabled = !self.anim.animation_enabled;
+            if self.anim.animation_enabled {
+                if let Some(ref handle) = self.anim.video {
+                    handle.cmd_tx.send(crate::video_stream::StreamCmd::Play).ok();
+                }
+            } else {
+                self.stop_animation();
+            }
+            return;
+        }
+
         if self.anim.frames.len() <= 1 {
             return;
         }
@@ -339,6 +387,15 @@ impl ImageBlock {
         self.anim.animation_enabled = false;
         self.anim.current_frame = 0;
         self.anim.frame_elapsed = Duration::ZERO;
+        self.anim.video_seq = 0;
+
+        if let Some(ref handle) = self.anim.video {
+            handle.cmd_tx.send(crate::video_stream::StreamCmd::Pause).ok();
+            self.texture
+                .set(handle.first_frame.clone(), egui::TextureOptions::LINEAR);
+            return;
+        }
+
         if let Some(first) = self.anim.frames.first() {
             self.texture
                 .set(first.image.clone(), egui::TextureOptions::LINEAR);

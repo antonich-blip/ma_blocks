@@ -54,6 +54,12 @@ pub fn load_image_frames_scaled(
     max_dimension: Option<u32>,
     first_frame_only: bool,
 ) -> Result<LoadedImage, String> {
+    // Video formats are handled by the streaming decoder; only first frame is
+    // decoded here (for static display). Full playback is driven by video_stream.
+    if crate::video_stream::is_video_format(path) {
+        return crate::video_stream::load_video_first_frame(path);
+    }
+
     let bytes =
         fs::read(path).map_err(|err| format!("Failed to read {}: {err}", path.display()))?;
 

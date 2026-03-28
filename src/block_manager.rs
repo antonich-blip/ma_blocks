@@ -231,7 +231,12 @@ impl BlockManager {
     /// Purges animation frames for a block, keeping only the first frame.
     fn purge_animation_frames(&mut self, id: Uuid) {
         if let Some(block) = self.get_mut(id) {
-            if block.is_full_sequence && block.anim.frames.len() > 1 {
+            if block.anim.video.is_some() {
+                // Drop the handle → Sender disconnect → decoder thread shuts down.
+                block.anim.video = None;
+                block.is_full_sequence = false;
+                block.stop_animation();
+            } else if block.is_full_sequence && block.anim.frames.len() > 1 {
                 block.anim.frames.truncate(1);
                 block.is_full_sequence = false;
                 block.stop_animation();

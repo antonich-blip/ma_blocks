@@ -18,10 +18,11 @@ use std::time::Duration;
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Commands sent from the main thread to the background decoder thread.
+// Drop/shutdown is implicit: when VideoBlockHandle is dropped, the Sender
+// disconnects and the decoder thread exits on the next TryRecvError::Disconnected.
 pub enum StreamCmd {
     Play,
     Pause,
-    /// Drop is implicit when the Sender is dropped (thread detects Disconnected).
 }
 
 /// A single decoded RGBA frame plus a monotonic sequence number.
@@ -83,20 +84,13 @@ pub fn load_video_first_frame(path: &Path) -> Result<crate::image_loader::Loaded
     let mut input = ff::format::input(path)
         .map_err(|e| format!("Failed to open {:?}: {e}", path))?;
 
-    let (stream_index, frame_duration) = {
+    let (stream_index, frame_duration, codec_params) = {
         let stream = input
             .streams()
             .best(ff::media::Type::Video)
             .ok_or_else(|| format!("No video stream in {:?}", path))?;
-        let dur = frame_duration_from_stream(&stream);
-        (stream.index(), dur)
+        (stream.index(), frame_duration_from_stream(&stream), stream.parameters())
     };
-
-    let codec_params = input
-        .streams()
-        .get(stream_index)
-        .unwrap()
-        .parameters();
 
     let mut decoder = ff::codec::context::Context::from_parameters(codec_params)
         .map_err(|e| format!("Codec context: {e}"))?
@@ -181,15 +175,13 @@ fn decoder_thread(
             }
         };
 
-        let stream_index = match input.streams().best(ffmpeg_next::media::Type::Video) {
-            Some(s) => s.index(),
+        let (stream_index, codec_params) = match input.streams().best(ffmpeg_next::media::Type::Video) {
+            Some(s) => (s.index(), s.parameters()),
             None => {
                 log::error!("video_stream: no video stream in {:?}", path);
                 break 'outer;
             }
         };
-
-        let codec_params = input.streams().get(stream_index).unwrap().parameters();
 
         let mut decoder =
             match ffmpeg_next::codec::context::Context::from_parameters(codec_params)
