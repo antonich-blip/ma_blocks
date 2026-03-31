@@ -5,10 +5,10 @@ Built with Rust using the `eframe`/`egui` framework.
 
 **Key Features:**
 - Drag-and-drop image organization with automatic row-based layout
-- Support for PNG, JPG, GIF, WebP, and AVIF (including animations)
-- Blocks chaining for grouping/manipulating related images (group resize, move, remove from canvas, add to box)
-- Box containers for organizing groups
-- Session save/load for persistent workspaces
+- Support for PNG, JPG, GIF, WebP, and AVIF (including animations), WebM (VP9)
+- Blocks chaining for manipulating related images (group resize, move, remove from canvas, add to box)
+- Box containers for organizing groups with packing/unpacking to canvas
+- Session save/load for persistent workspaces, also session automatic memory
 - Efficient memory management with async loading and LRU caching
 
 **Supported Platforms:** Linux (Wayland/X11), macOS
@@ -48,21 +48,6 @@ cargo build --release
 ```
 The release binary will be located at `target/release/ma_blocks2`.
 
-
-## Nix_Os: personal use case
-
-```sh
-Verify it works:
-which ma_blocks2          # Should show ~/.nix-profile/bin/ma_blocks2
-ma_blocks2 --help         # Or just run it
-To update after rebuilding:
-cd /home/nixos/projects/ma_blocks && nix build .#default
-nix profile upgrade ma_blocks2   # Or: nix profile add .#default --overwrite
-
-```
-
----
-
 ## Usage
 
 ### Controls
@@ -82,7 +67,7 @@ nix profile upgrade ma_blocks2   # Or: nix profile add .#default --overwrite
 
 - **Save Session** - Save current canvas state to JSON file
 - **Load Session** - Restore a previous session from JSON file
-- **Add Image** - Bulk load images
+- **Add Image(s)** - Bulk load images
 - **Reset Counters** - Reset all block counters to zero
 - **Compact/Unbox** - Pack chained blocks into a Box or unpack
 
@@ -115,7 +100,7 @@ MaBlocks2 is designed to handle a large number of images efficiently:
 - **Memory Capping:** 
     - **Downsampling:** Large images are automatically downsampled during loading to fit within reasonable dimensions, significantly reducing VRAM and RAM usage.
     - **Frame Limits:** Animation sequences are limited to a maximum of 1024 frames to prevent excessive memory consumption from long or high-fps animations.
-    - **Animation Cache (LRU Purging):** To prevent GPU/RAM overload from many active animations, only the 20 most recently played animations are kept in memory. Older animations are automatically purged (reverting to their first frame) and will be reloaded on demand if played again.
+    - **Animation Cache (LRU Purging):** To prevent GPU/RAM overload from many active animations, only the 10 most recently played animations are kept in memory. Older animations are automatically purged (reverting to their first frame) and will be reloaded on demand if played again.
 - **Auto-Height Matching:** Newly added images automatically scale to match the tallest existing block, maintaining a uniform layout.
 
 ---
@@ -125,14 +110,14 @@ MaBlocks2 is designed to handle a large number of images efficiently:
 ### Canvas
 
 - Unlimited vertical scrolling and 2D panning
-- Dynamic horizontal width that reflows content based on window size or zoom level
+- Dynamic horizontal width that reflows content based on window width and zoom level
 - Zoom support affecting all canvas elements and layout
 
 ### Blocks
 
-- **Image Blocks:** Support for PNG, JPG, GIF, WebP, and AVIF with full transparency and animation
+- **Image Blocks:** Support for PNG, JPG, GIF, WebP, and AVIF with full transparency and animation, also added Webm video support
 - **Box Blocks:** Container blocks that hold groups of other blocks (displayed at the top of the canvas)
-- All blocks maintain their aspect ratio during operations
+- All blocks maintain their aspect ratio during resize or any other operations
 
 ### Layout & Alignment
 
@@ -150,7 +135,7 @@ MaBlocks2 is designed to handle a large number of images efficiently:
 
 ### Boxing & Containers
 
-- Pack chained blocks into a Box using the toolbar button
+- Pack chained/selected blocks into a Box using the toolbar button
 - **Drag-to-Box:** Drop individual blocks directly into a Box
 - Nested boxes are not permitted
 - **Smart Toggle:** The box button re-boxes the last unboxed group or unboxes the most recent box when nothing is selected
